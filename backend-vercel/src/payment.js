@@ -41,7 +41,11 @@ async function createVoiceChangeOrder(req, res) {
     // FAKE PAYMENT MODE (Dev only)
     if (process.env.ENABLE_FAKE_PAYMENT === 'true') {
       const fakeOrderId = `FAKE-${Date.now()}`
-      const fakeUrl = `${process.env.API_BASE || 'http://localhost:3000'}/api/fake-pay?orderId=${fakeOrderId}`
+      const forwardedProto = req.headers['x-forwarded-proto']
+      const protocol = (Array.isArray(forwardedProto) ? forwardedProto[0] : forwardedProto) || req.protocol || 'https'
+      const host = req.get('host')
+      const apiBase = process.env.API_BASE || (host ? `${protocol}://${host}` : 'http://localhost:3000')
+      const fakeUrl = `${apiBase}/api/fake-pay?orderId=${fakeOrderId}`
       return res.json({
         ok: true,
         order_id: fakeOrderId,
