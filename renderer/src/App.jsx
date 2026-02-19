@@ -973,13 +973,6 @@ const ControlHub = () => {
                      >
                        Create $5 payment
                      </button>
-                     <button
-                       onClick={completeVoiceChange}
-                       disabled={isTranslating}
-                       className="w-full py-2 bg-gray-800 hover:bg-gray-750 border border-gray-700 hover:border-cyan-500/50 rounded-lg text-gray-300 text-xs font-medium transition-all disabled:opacity-50"
-                     >
-                       Complete voice update
-                     </button>
                    </div>
 
                    <input
@@ -1053,54 +1046,16 @@ const ControlHub = () => {
                      </button>
                    )}
 
-                   {voiceApprovalUrl && (
-                     <div className="grid grid-cols-2 gap-2 mt-2">
-                       <button
-                        onClick={async () => {
-                          const opened = await window.electronAPI?.openExternal?.(voiceApprovalUrl)
-                          if (!opened || opened.ok === false) {
-                            try { window.open(voiceApprovalUrl, '_blank', 'noopener,noreferrer') } catch {}
-                          }
-                        }}
-                         className="w-full py-2 bg-gray-800 hover:bg-gray-750 border border-gray-700 hover:border-cyan-500/50 rounded-lg text-gray-300 text-xs font-medium transition-all"
-                       >
-                         Open Payment Link
-                       </button>
-                       <button
-                        onClick={async () => {
-                          setVoiceUiStatus('Checking payment...');
-                          try {
-                            const base = backendUrl || (await window.electronAPI?.getBackendUrl?.()) || '';
-                            const uid = installId || (await window.electronAPI?.getInstallId?.()) || '';
-                            if (!base || !uid || !voiceOrderId) return;
-                            
-                            const fd = new FormData();
-                            fd.append('order_id', voiceOrderId);
-                            fd.append('user_id', uid);
-                            fd.append('device_id', uid);
-                            if (voiceSample) fd.append('sample', voiceSample);
+                  {voiceApprovalUrl && (
+                    <button
+                      onClick={completeVoiceChange}
+                      disabled={isTranslating || !voiceSample}
+                      className="w-full mt-2 py-2 bg-cyan-900/30 hover:bg-cyan-900/50 border border-cyan-800 hover:border-cyan-500 rounded-lg text-cyan-200 text-xs font-medium transition-all disabled:opacity-50"
+                    >
+                      Complete Voice Update
+                    </button>
+                  )}
 
-                            const r = await fetch(`${base}/api/voice/update/complete`, { method: 'POST', body: fd });
-                            const j = await r.json();
-                            
-                            if (r.ok && j.ok) {
-                              setVoiceUiStatus('Payment confirmed! Voice updated.');
-                              setVoiceApprovalUrl(null);
-                              setVoiceOrderId(null);
-                              setVoiceSample(null);
-                            } else {
-                              setVoiceUiStatus(j.error || 'Payment not completed yet');
-                            }
-                          } catch (e) {
-                            setVoiceUiStatus('Error checking payment');
-                          }
-                        }}
-                         className="w-full py-2 bg-cyan-900/30 hover:bg-cyan-900/50 border border-cyan-800 hover:border-cyan-500 rounded-lg text-cyan-200 text-xs font-medium transition-all"
-                       >
-                         Complete Voice Update
-                       </button>
-                     </div>
-                   )}
                    {voiceUiStatus && (
                      <div className="text-xs text-gray-400 mt-1">{voiceUiStatus}</div>
                    )}
