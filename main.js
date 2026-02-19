@@ -72,7 +72,7 @@ process.env.GOOGLE_APPLICATION_CREDENTIALS = process.env.GOOGLE_APPLICATION_CRED
 // *********************************************************
 // THAY THẾ KEY VÀ VOICE ID THỰC TẾ CỦA BẠN VÀO ĐÂY
 // *********************************************************
-const BACKEND_URL = (process.env.BACKEND_URL || 'https://translator-backend-pi.vercel.app').toString().trim();
+const BACKEND_URL = (process.env.BACKEND_URL || (isDev ? 'http://localhost:3000' : 'https://translator-backend-pi.vercel.app')).toString().trim();
 const CYAN_USER_ID = (process.env.CYAN_USER_ID || '').toString().trim();
 const projectId = (process.env.GCP_PROJECT_ID || '').toString().trim();
 

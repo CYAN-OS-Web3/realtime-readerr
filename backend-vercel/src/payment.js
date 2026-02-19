@@ -44,7 +44,8 @@ async function createVoiceChangeOrder(req, res) {
       const forwardedProto = req.headers['x-forwarded-proto']
       const protocol = (Array.isArray(forwardedProto) ? forwardedProto[0] : forwardedProto) || req.protocol || 'https'
       const host = req.get('host')
-      const apiBase = process.env.API_BASE || (host ? `${protocol}://${host}` : 'http://localhost:3000')
+      const localHost = host && (host.includes('localhost') || host.startsWith('127.0.0.1'))
+      const apiBase = process.env.API_BASE || (localHost ? 'http://localhost:3000' : (host ? `${protocol}://${host}` : 'http://localhost:3000'))
       const fakeUrl = `${apiBase}/api/fake-pay?orderId=${fakeOrderId}`
       return res.json({
         ok: true,

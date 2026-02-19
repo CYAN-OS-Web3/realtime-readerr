@@ -793,7 +793,8 @@ const ControlHub = () => {
                  onClick={(e) => {
                     // Alt + Click to enter manual User ID (Developer Mode / Test Mode)
                     if (e.altKey) {
-                        const manualId = prompt('Enter Manual User ID (Dev Mode):', '102870395312994795443');
+                        const manualId = '102870395312994795443'; // Default for dev mode
+                        // const manualId = prompt('Enter Manual User ID (Dev Mode):', '102870395312994795443');
                         if (manualId) {
                             setAuthUserId(manualId);
                             setInstallId(manualId);
