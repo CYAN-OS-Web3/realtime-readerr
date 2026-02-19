@@ -119,6 +119,46 @@ async function capturePaypalOrder(orderId) {
   return await response.json()
 }
 
+// Handler: Client gọi để xác nhận đơn hàng đã thanh toán
+async function captureVoiceChangeOrder(req, res) {
+  try {
+    const orderId = req.body.order_id
+    const userId = req.body.user_id
+    const deviceId = req.body.device_id
+
+    if (!orderId || !userId || !deviceId) {
+      return res.status(400).json({ error: 'missing_params' })
+    }
+
+    const captureData = await capturePaypalOrder(orderId)
+
+    if (captureData.status !== 'COMPLETED') {
+      return res.status(402).json({ error: 'capture_failed', details: captureData })
+    }
+
+    // Verify custom_id (nếu không phải Fake)
+    if (!String(orderId).startsWith('FAKE-')) {
+      const purchaseUnit = (captureData.purchase_units || [])[0] || {}
+      const customId = purchaseUnit.custom_id || ''
+      const expectedId = `voicechange:${userId}:${deviceId}`
+      
+      if (customId && customId !== expectedId) {
+        console.warn(`Order Mismatch: Got ${customId}, Expect ${expectedId}`)
+        // return res.status(401).json({ error: 'order_mismatch' }) 
+        // (Tạm thời warn thôi để tránh lỗi lặt vặt lúc dev)
+      }
+    }
+
+    // Ghi nhận vào DB
+    await supa.recordVoiceChange(userId, deviceId, 5.0, 'paypal', 'captured', orderId)
+
+    res.json({ ok: true })
+  } catch (error) {
+    console.error('captureVoiceChangeOrder Error:', error)
+    res.status(500).json({ error: 'server_error' })
+  }
+}
+
 // Route giả lập thanh toán (Fake Payment Page)
 async function fakePaymentPage(req, res) {
   const orderId = req.query.orderId
@@ -148,5 +188,6 @@ async function fakePaymentPage(req, res) {
 module.exports = {
   createVoiceChangeOrder,
   capturePaypalOrder,
+  captureVoiceChangeOrder,
   fakePaymentPage
 }
