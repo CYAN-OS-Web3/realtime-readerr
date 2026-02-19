@@ -1,0 +1,126 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cyan ULTRA-LOW LATENCY AI TRANSLATOR</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="card">
+    <div class="header">
+      <div class="row" style="gap:6px">
+        <span style="font-weight:bold;color:#fff">🌐</span>
+        <span class="title" style="color:#fff">Cyan ULTRA-LOW LATENCY AI TRANSLATOR</span>
+      </div>
+      <div class="row" style="gap:6px">
+        <span class="small">SDK Mode</span>
+      </div>
+    </div>
+    <div class="section">
+      <div class="row">
+        <div class="row" style="gap:6px">
+          <span class="small">Server</span>
+          <span id="serverPill" class="pill pill-online">ONLINE</span>
+          <span id="latency" class="small">0ms</span>
+        </div>
+        <button class="btn" id="enableSite">Enable AI-Only</button>
+      </div>
+      <div class="grid" style="margin-top:8px">
+        <div>
+          <label class="label">API BASE URL</label>
+          <input class="input" id="apiBase" placeholder="https://your-vercel-app.vercel.app" />
+        </div>
+        <div>
+          <label class="label">API KEY</label>
+          <input class="input" id="apiKey" placeholder="sk_live_..." />
+        </div>
+      </div>
+      <div class="grid" style="margin-top:8px">
+        <div>
+          <label class="label">SOURCE</label>
+          <select class="select" id="sourceLang"></select>
+        </div>
+        <div>
+          <label class="label">TARGET</label>
+          <select class="select" id="targetLang"></select>
+        </div>
+      </div>
+      <div style="margin-top:8px">
+        <label class="label">TTS ENGINE</label>
+        <select class="select" id="ttsEngine">
+          <option value="elevenlabs">ElevenLabs (High Quality)</option>
+          <option value="azure">Azure Neural (Fast)</option>
+          <option value="google">Google WaveNet (Standard)</option>
+        </select>
+      </div>
+      <div style="margin-top:8px">
+        <label class="label">VOICE GENDER</label>
+        <select class="select" id="voiceGender">
+          <option value="female">Female</option>
+          <option value="male">Male</option>
+        </select>
+      </div>
+      <div class="grid" style="margin-top:8px">
+        <div>
+          <label class="label">Nhập text để nói</label>
+          <input class="input" id="ttsText" placeholder="Nhập text" />
+        </div>
+        <div>
+          <label class="label">User ID (Supabase)</label>
+          <input class="input" id="userId" placeholder="uuid" />
+        </div>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <input type="file" id="sampleFile" accept="audio/mpeg,audio/mp3" />
+        <button class="btn" id="localFeedback">Local Feedback</button>
+      </div>
+      <div style="margin-top:8px" class="preview">
+        <div class="row">
+          <span class="small">MICROPHONE INPUT</span>
+          <span id="micActive" class="small">Ready</span>
+        </div>
+        <div class="row" style="margin-top:6px">
+          <span class="small">Volume</span>
+          <span id="micVol" class="small">0%</span>
+        </div>
+        <div class="meter"><div id="meterFill" class="meter-fill" style="width:0%"></div></div>
+        <div class="row" style="margin-top:6px">
+          <span class="small">Sensitivity</span>
+          <span id="sensVal" class="small">50%</span>
+        </div>
+        <input type="range" id="sensitivity" min="0" max="100" value="50" style="width:100%" />
+      </div>
+      <div style="margin-top:10px" class="grid">
+        <button class="btn btn-primary" id="cloneSpeak">Clone & Speak</button>
+        <button class="btn" id="cloneStream">Clone & Stream</button>
+      </div>
+      <div class="row" style="margin-top:6px">
+        <span id="cloneStatus" class="small"></span>
+        <span id="streamStatus" class="small"></span>
+      </div>
+      <div style="margin-top:10px" class="preview">
+        <div class="row"><span class="small">TRANSLATION PREVIEW</span><span id="livePill" class="pill pill-online" style="display:none">LIVE</span></div>
+        <div id="previewSource" class="small" style="margin-top:6px; color:#9ca3af">—</div>
+        <div id="previewTarget" class="small" style="margin-top:6px; color:#a7f3d0">—</div>
+      </div>
+      <div class="grid" style="margin-top:10px">
+        <button class="btn" id="getQuota">Get Quota</button>
+        <div class="row" style="gap:6px; align-items:center">
+          <span class="small">Quota:</span>
+          <span id="quotaText" class="small">—</span>
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px; justify-content:space-between">
+        <button class="btn" id="downloadAppBtn">Download Desktop App</button>
+        <span class="small" id="downloadHint">Link tải: GitHub Releases/Vercel</span>
+      </div>
+    </div>
+    <div class="section" style="border-top:1px solid #1f2937; display:flex; justify-content:space-between; align-items:center">
+      <div class="row" style="gap:6px"><span>🎙️</span><span class="small" id="footerState">Ready</span></div>
+      <span class="small">v0.1.1</span>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

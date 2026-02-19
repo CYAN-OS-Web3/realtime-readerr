@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Conference Mode Overlay</title>
+    <style>
+        /* ------------------------------------------------------------------- */
+        /* CSS CHO OVERLAY (SIÊU GỌN, TRONG SUỐT) */
+        /* ------------------------------------------------------------------- */
+        :root {
+            /* Sử dụng màu cyan đã tinh chỉnh từ index.html */
+            --cyan: #00bcd4;
+        }
+
+        body {
+            /* Nền hoàn toàn trong suốt */
+            background-color: transparent; 
+            margin: 0;
+            overflow: hidden; /* Đảm bảo không có thanh cuộn */
+            text-align: center;
+            /* Phông chữ cho chế độ Overlay cần cực kỳ dễ đọc */
+            font-family: 'Segoe UI', 'Roboto', sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh; /* Chiếm toàn bộ chiều cao cửa sổ */
+        }
+        
+        #translation-output {
+            /* Kích thước chữ lớn để hiển thị rõ ràng trên màn hình */
+            font-size: 3em; 
+            font-weight: 700;
+            color: white; /* Màu chữ trắng để nổi bật */
+            background-color: rgba(0, 0, 0, 0.4); /* Nền tối nhẹ để chữ nổi bật hơn nữa */
+            padding: 5px 15px;
+            border-radius: 8px;
+            /* Viền đen dày để chữ nổi bật trên mọi nền (white-on-black) */
+            text-shadow: 
+                -2px -2px 0 #000, 
+                2px -2px 0 #000, 
+                -2px 2px 0 #000, 
+                2px 2px 0 #000,
+                0 0 10px var(--cyan); /* Thêm glow nhẹ để tăng tính thẩm mỹ */
+            
+            /* Đảm bảo văn bản không tràn ra ngoài */
+            word-wrap: break-word;
+            max-width: 95%; 
+        }
+
+        /* Ẩn nội dung nếu không có bản dịch để giữ cửa sổ gọn gàng */
+        #translation-output:empty {
+            visibility: hidden;
+        }
+
+    </style>
+</head>
+<body>
+    <div id="translation-output"></div>
+
+    <script src="./overlay_renderer.js"></script>
+</body>
+</html>

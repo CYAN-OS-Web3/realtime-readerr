@@ -1,0 +1,12 @@
+Windows Registry Editor Version 5.00
+
+[HKEY_CLASSES_ROOT\cyanos]
+@="URL:CyanOS Protocol"
+"URL Protocol"=""
+
+[HKEY_CLASSES_ROOT\cyanos\shell]
+
+[HKEY_CLASSES_ROOT\cyanos\shell\open]
+
+[HKEY_CLASSES_ROOT\cyanos\shell\open\command]
+@="\"C:\\Users\\DELL GAMEMING\\realtime-speech-translation\\node_modules\\electron\\dist\\electron.exe\" \"C:\\Users\\DELL GAMEMING\\realtime-speech-translation\\main.js\" \"%1\""

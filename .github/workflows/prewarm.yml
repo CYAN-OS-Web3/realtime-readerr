@@ -1,0 +1,15 @@
+name: Prewarm Vercel Function
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call prewarm endpoint
+        run: |
+          if [ -z "$PREWARM_URL" ]; then echo "PREWARM_URL not set"; exit 0; fi
+          curl -sS "${PREWARM_URL}/api/_prewarm" || true
+        env:
+          PREWARM_URL: ${{ secrets.PREWARM_URL }}

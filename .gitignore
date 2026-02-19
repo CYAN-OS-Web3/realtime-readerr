@@ -1,0 +1,16 @@
+node_modules
+.env
+dist
+renderer/dist
+renderer/node_modules
+.trae
+*.log
+.DS_Store
+Thumbs.db
+gcp-service-key.json
+cd
+npm
+vite
+concurrently
+realtime-translator@1.0.0
+renderer@0.1.0

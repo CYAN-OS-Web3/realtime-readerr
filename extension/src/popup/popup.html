@@ -1,0 +1,186 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cyan ULTRA-LOW LATENCY AI TRANSLATOR</title>
+  <style>
+    :root{
+      --bg:#0b0f14; --panel:#0a0d12; --border:#143a45; --text:#d1d5db; --muted:#9ca3af;
+      --cyan:#06b6d4; --cyan-dark:#0891b2; --red:#ef4444; --gray:#111827; --gray-2:#1f2937; --gray-3:#374151;
+    }
+    html,body{margin:0;padding:0}
+    body{font-family:system-ui,Segoe UI,Arial; background:linear-gradient(180deg,#0b0f14,#0b0f14 60%,#0a0d12); color:var(--text); width:380px}
+    .card{background:var(--panel); border:1px solid rgba(20,58,69,.3); border-radius:10px; overflow:hidden; box-shadow:0 10px 30px rgba(0,0,0,.4)}
+    .header{background:linear-gradient(90deg,var(--cyan-dark),#0ea5b7); padding:10px 12px; display:flex; align-items:center; justify-content:space-between}
+    .title{font-weight:600; font-size:12px}
+    .section{padding:12px}
+    .label{font-size:11px; color:#94a3b8; margin-bottom:6px; display:block}
+    .select,.input{width:100%; padding:8px 10px; border-radius:8px; border:1px solid #2b3b46; background:#0f172a; color:#e5e7eb; font-size:12px}
+    .btn{padding:10px 12px; border-radius:10px; border:1px solid #2b3b46; background:#0f172a; color:#e5e7eb; font-size:12px; cursor:pointer}
+    .btn:hover{border-color:#2563eb33}
+    .btn-primary{background:linear-gradient(90deg,#06b6d4,#0ea5b7); color:#fff; border:none}
+    .btn-primary.stop{background:#ef4444}
+    .grid{display:grid; grid-template-columns:1fr 1fr; gap:10px}
+    .meter{height:8px; background:#0f172a; border-radius:999px; overflow:hidden; border:1px solid #1f2937}
+    .meter-fill{height:100%; transition:width .15s ease; background:#06b6d4}
+    .preview{background:#0b1324; border:1px solid #1f2937; border-radius:8px; padding:8px}
+    .pill{padding:2px 6px; border-radius:999px; font-size:10px}
+    .pill-online{background:rgba(6,182,212,.15); color:#6ed7e8}
+    .pill-off{background:rgba(239,68,68,.15); color:#fca5a5}
+    .row{display:flex; gap:8px; align-items:center; justify-content:space-between}
+    .small{font-size:11px; color:#94a3b8}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="header">
+      <div class="row" style="gap:6px">
+        <span style="font-weight:bold;color:#fff">🌐</span>
+        <span class="title" style="color:#fff">Cyan ULTRA-LOW LATENCY AI TRANSLATOR</span>
+      </div>
+      <div class="row" style="gap:6px">
+        <span class="small">SDK Mode</span>
+      </div>
+    </div>
+    <div class="section">
+      <div class="row">
+        <div class="row" style="gap:6px">
+          <span class="small">Server</span>
+          <span id="serverPill" class="pill pill-online">ONLINE</span>
+          <span id="latency" class="small">0ms</span>
+        </div>
+        <button class="btn" id="enableSite">Enable AI-Only</button>
+      </div>
+      <div class="grid" style="margin-top:8px">
+        <div>
+          <label class="label">API BASE URL</label>
+          <input class="input" id="apiBase" placeholder="https://your-vercel-app.vercel.app" />
+        </div>
+        <div>
+          <label class="label">API KEY</label>
+          <input class="input" id="apiKey" placeholder="sk_live_..." />
+        </div>
+      </div>
+      <div class="grid" style="margin-top:8px">
+        <div>
+          <label class="label">SOURCE</label>
+          <select class="select" id="sourceLang"></select>
+        </div>
+        <div>
+          <label class="label">TARGET</label>
+          <select class="select" id="targetLang"></select>
+        </div>
+      </div>
+      <div style="margin-top:8px">
+        <label class="label">TTS ENGINE</label>
+        <select class="select" id="ttsEngine">
+          <option value="elevenlabs">ElevenLabs (High Quality)</option>
+          <option value="azure">Azure Neural (Fast)</option>
+          <option value="google">Google WaveNet (Standard)</option>
+        </select>
+      </div>
+      <div style="margin-top:8px">
+        <label class="label">VOICE GENDER</label>
+        <select class="select" id="voiceGender">
+          <option value="female">Female</option>
+          <option value="male">Male</option>
+        </select>
+      </div>
+      <div style="margin-top:8px" class="preview">
+        <div class="row"><span class="small">ASSIGN PREMIUM VOICE (ElevenLabs)</span></div>
+        <div class="grid" style="margin-top:6px">
+          <div>
+            <label class="label">Device ID</label>
+            <input class="input" id="deviceId" placeholder="e.g. laptop-01" />
+          </div>
+          <div>
+            <label class="label">Voice Sample (mp3)</label>
+            <input type="file" id="voiceSample" accept="audio/mpeg,audio/mp3" style="display:none" />
+            <div class="row" style="margin-top:6px">
+              <button class="btn" id="chooseVoiceSampleBtn">Choose file</button>
+              <span id="voiceSampleName" class="small">No file chosen</span>
+            </div>
+          </div>
+        </div>
+        <div class="row" style="margin-top:6px">
+          <button class="btn" id="assignVoiceBtn">Assign Voice</button>
+          <span id="assignStatus" class="small"></span>
+        </div>
+        <div class="row" style="margin-top:6px">
+          <button class="btn" id="updateVoiceBtn">Update Voice ($5)</button>
+          <button class="btn" id="capturePaymentBtn">Complete Update</button>
+          <span id="updateStatus" class="small"></span>
+        </div>
+      </div>
+      <div class="grid" style="margin-top:8px">
+        <div>
+          <label class="label">Nhập text để nói</label>
+          <input class="input" id="ttsText" placeholder="Nhập text" />
+        </div>
+        <div>
+          <label class="label">User ID (Supabase)</label>
+          <input class="input" id="userId" placeholder="uuid" />
+        </div>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <input type="file" id="sampleFile" accept="audio/mpeg,audio/mp3" />
+        <button class="btn" id="localFeedback">Local Feedback</button>
+      </div>
+      <div style="margin-top:8px" class="preview">
+        <div class="row">
+          <span class="small">MICROPHONE INPUT</span>
+          <span id="micActive" class="small">Ready</span>
+        </div>
+        <div class="row" style="margin-top:6px">
+          <span class="small">Volume</span>
+          <span id="micVol" class="small">0%</span>
+        </div>
+        <div class="meter"><div id="meterFill" class="meter-fill" style="width:0%"></div></div>
+        <div class="row" style="margin-top:6px">
+          <span class="small">Sensitivity</span>
+          <span id="sensVal" class="small">50%</span>
+        </div>
+        <input type="range" id="sensitivity" min="0" max="100" value="50" style="width:100%" />
+      </div>
+      <div style="margin-top:10px" class="grid">
+        <button class="btn btn-primary" id="cloneSpeak">Clone & Speak</button>
+        <button class="btn" id="cloneStream">Clone & Stream</button>
+      </div>
+      <div class="row" style="margin-top:6px">
+        <span id="cloneStatus" class="small"></span>
+        <span id="streamStatus" class="small"></span>
+      </div>
+      <div style="margin-top:10px" class="preview">
+        <div class="row"><span class="small">TRANSLATION PREVIEW</span><span id="livePill" class="pill pill-online" style="display:none">LIVE</span></div>
+        <div id="previewSource" class="small" style="margin-top:6px; color:#9ca3af">—</div>
+        <div id="previewTarget" class="small" style="margin-top:6px; color:#a7f3d0">—</div>
+      </div>
+      <div class="grid" style="margin-top:10px">
+        <button class="btn" id="getQuota">Get Quota</button>
+        <div class="row" style="gap:6px; align-items:center">
+          <span class="small">Quota:</span>
+          <span id="quotaText" class="small">—</span>
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px; justify-content:space-between">
+        <button class="btn" id="downloadAppBtn">Download Desktop App</button>
+        <span class="small" id="downloadHint">Link tải: GitHub Releases/Vercel</span>
+      </div>
+      <div class="section" style="margin-top:10px">
+        <div class="row" style="gap:6px; align-items:center">
+          <button class="btn btn-primary" id="subscribeBtn">Subscribe Premium</button>
+          <button class="btn" id="checkSubBtn">Check Subscription</button>
+          <button class="btn" id="activateSubBtn">Activate Premium</button>
+          <span id="subStatus" class="small"></span>
+        </div>
+      </div>
+    </div>
+    <div class="section" style="border-top:1px solid #1f2937; display:flex; justify-content:space-between; align-items:center">
+      <div class="row" style="gap:6px"><span>🎙️</span><span class="small" id="footerState">Ready</span></div>
+      <span class="small">v0.1.1</span>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
