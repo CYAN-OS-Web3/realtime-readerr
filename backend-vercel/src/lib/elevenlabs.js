@@ -4,10 +4,22 @@ const agent = new https.Agent({ keepAlive: true, keepAliveMsecs: 30000, maxSocke
 const apiKey = process.env.ELEVENLABS_API_KEY || ''
 async function createVoiceFromSample(buffer, name){ 
   if (!apiKey) throw new Error('elevenlabs_api_key_missing')
-  const form = new (require('form-data'))(); 
-  form.append('name', name); 
-  form.append('files', buffer, { filename:'sample.mp3', contentType:'audio/mpeg' }); 
-  const r = await fetch('https://api.elevenlabs.io/v1/voices/add', { method:'POST', headers:{ 'xi-api-key': apiKey }, body: form, agent }); 
+  const FormData = require('form-data');
+  const form = new FormData();
+  form.append('name', name);
+  form.append('files', buffer, { filename: 'sample.mp3', contentType: 'audio/mpeg' });
+  form.append('description', 'User voice clone');
+  
+  const r = await fetch('https://api.elevenlabs.io/v1/voices/add', {
+    method: 'POST',
+    headers: {
+      'xi-api-key': apiKey,
+      ...form.getHeaders()
+    },
+    body: form,
+    agent
+  });
+  
   const j = await r.json(); 
   if (!r.ok || !j.voice_id) {
     throw new Error(`elevenlabs_create_voice_failed: ${r.status} ${JSON.stringify(j)}`)
