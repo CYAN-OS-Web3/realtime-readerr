@@ -12,15 +12,6 @@ function paypalBase() {
 async function getAccessToken() {
   const clientId = process.env.PAYPAL_CLIENT_ID
   const clientSecret = process.env.PAYPAL_CLIENT_SECRET
-  
-  // DEBUG LOGGING
-  console.log('PayPal Config Check:', {
-    hasClientId: !!clientId,
-    clientIdLength: clientId ? clientId.length : 0,
-    hasClientSecret: !!clientSecret,
-    mode: process.env.PAYPAL_MODE
-  });
-
   if (!clientId || !clientSecret) throw new Error('Missing PayPal credentials')
 
   const auth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64')
