@@ -1,10 +1,17 @@
 const { SpeechClient } = require('@google-cloud/speech');
 
-// Initialize Google Speech client
-const speechClient = new SpeechClient({
-  keyFilename: process.env.GOOGLE_APPLICATION_CREDENTIALS || null,
-  projectId: process.env.GOOGLE_PROJECT_ID || null
-});
+// Lazy initialization of Google Speech client
+let speechClient = null;
+
+function getSpeechClient() {
+  if (!speechClient) {
+    speechClient = new SpeechClient({
+      keyFilename: process.env.GOOGLE_APPLICATION_CREDENTIALS || null,
+      projectId: process.env.GOOGLE_PROJECT_ID || null
+    });
+  }
+  return speechClient;
+}
 
 async function recognizeSpeech(req, res) {
   const startMs = Date.now();
@@ -30,7 +37,8 @@ async function recognizeSpeech(req, res) {
       }
     };
 
-    const [response] = await speechClient.recognize(request);
+    const client = getSpeechClient();
+    const [response] = await client.recognize(request);
     const transcript = response.results
       .map(result => result.alternatives[0].transcript)
       .join('\n');
@@ -79,7 +87,8 @@ async function streamSpeech(req, res) {
       }
     };
 
-    const recognizeStream = speechClient.streamingRecognize(request)
+    const client = getSpeechClient();
+    const recognizeStream = client.streamingRecognize(request)
       .on('error', (error) => {
         console.error('STT Stream Error:', error);
         res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
