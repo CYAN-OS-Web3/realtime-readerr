@@ -451,11 +451,16 @@ async function translateAndSpeak(text, targetLang, ttsEngine) {
         } catch (e) {}
 
         if (ttsEngine === 'elevenlabs') {
+            console.log(`🔊 Using ElevenLabs TTS engine`);
             await callElevenLabsTTSService(translatedText, targetLang);
         } else if (ttsEngine === 'azure') {
+            console.log(`🔊 Using Azure TTS engine`);
             await callAzureTTSService(translatedText, targetLang);
         } else if (ttsEngine === 'google') {
+            console.log(`🔊 Using Google TTS engine`);
             callGoogleWaveNetTTSService(translatedText, targetLang);
+        } else {
+            console.log(`🔊 Unknown TTS engine: ${ttsEngine}`);
         }
 
     } catch (e) {
