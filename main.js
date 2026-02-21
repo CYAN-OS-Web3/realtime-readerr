@@ -594,12 +594,14 @@ async function processAudioBatch(language, sampleRate) {
         // Clear buffer and reset timer
         audioBuffer = [];
         backendStreamResponse = null;
+        console.log(`🎤 Audio buffer cleared, ready for next batch`);
         
         // Continue processing if still streaming
         if (isStreaming) {
+            console.log(`🎤 Still streaming, setting up next batch processing`);
             backendStreamResponse = setTimeout(() => {
                 processAudioBatch(language, sampleRate);
-            }, 2000);
+            }, 3000); // Use 3 seconds
         }
     }
 }
