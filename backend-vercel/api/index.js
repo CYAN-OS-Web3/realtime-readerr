@@ -3,6 +3,7 @@ const cors = require('cors')
 const multer = require('multer')
 const ttsRoutes = require('../src/routes/tts')
 const sttRoutes = require('../src/routes/stt')
+const debugRoutes = require('../src/routes/debug')
 const user = require('../src/user')
 const payment = require('../src/payment')
 const voice = require('../src/voice')
@@ -95,6 +96,9 @@ app.post('/api/fake-pay', payment.fakePaymentPage) // Add fake payment route
 // STT (Speech-to-Text) endpoints
 app.post('/api/stt/recognize', sttRoutes.recognizeSpeech)
 app.post('/api/stt/stream', sttRoutes.streamSpeech)
+
+// Debug endpoints
+app.get('/api/debug/env', debugRoutes.debugEnv)
 
 // Test endpoint for debugging
 app.get('/api/test', require('./test'))
