@@ -5,32 +5,21 @@ let speechClient = null;
 
 function getSpeechClient() {
   if (!speechClient) {
-    // Debug: Log environment variables
-    console.log('Environment Variables Check:');
-    console.log('GOOGLE_SPEECH_API_KEY exists:', !!process.env.GOOGLE_SPEECH_API_KEY);
-    console.log('GOOGLE_SPEECH_API_KEY length:', process.env.GOOGLE_SPEECH_API_KEY?.length || 0);
-    console.log('GOOGLE_PROJECT_ID:', process.env.GOOGLE_PROJECT_ID);
-    
-    // Only use API Key method (simplified)
+    // Force API Key authentication only
     const apiKey = process.env.GOOGLE_SPEECH_API_KEY;
     
-    let clientConfig = {
-      projectId: process.env.GOOGLE_PROJECT_ID || null
-    };
-    
-    // API Key is required
-    if (apiKey && apiKey.trim() !== '') {
-      clientConfig.apiKey = apiKey.trim();
-      console.log('✅ Using Google Speech API Key for authentication');
-    } else {
-      console.log('❌ GOOGLE_SPEECH_API_KEY not found or empty');
-      throw new Error('GOOGLE_SPEECH_API_KEY environment variable is required');
+    if (!apiKey || apiKey.trim() === '') {
+      throw new Error('GOOGLE_SPEECH_API_KEY environment variable is required and not found');
     }
     
-    console.log('Final client config:', {
-      projectId: clientConfig.projectId,
-      hasApiKey: !!clientConfig.apiKey
-    });
+    const clientConfig = {
+      projectId: process.env.GOOGLE_PROJECT_ID || 'gen-lang-client-0283634999',
+      apiKey: apiKey.trim()
+    };
+    
+    console.log('✅ Using Google Speech API Key for authentication');
+    console.log('Project ID:', clientConfig.projectId);
+    console.log('API Key length:', clientConfig.apiKey.length);
     
     speechClient = new SpeechClient(clientConfig);
   }
