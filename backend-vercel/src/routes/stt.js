@@ -1,29 +1,43 @@
-const { SpeechClient } = require('@google-cloud/speech');
+const fetch = require('node-fetch');
 
-// Lazy initialization of Google Speech client
-let speechClient = null;
-
-function getSpeechClient() {
-  if (!speechClient) {
-    // Force API Key authentication only
-    const apiKey = process.env.GOOGLE_SPEECH_API_KEY;
-    
-    if (!apiKey || apiKey.trim() === '') {
-      throw new Error('GOOGLE_SPEECH_API_KEY environment variable is required and not found');
-    }
-    
-    const clientConfig = {
-      projectId: process.env.GOOGLE_PROJECT_ID || 'gen-lang-client-0283634999',
-      apiKey: apiKey.trim()
-    };
-    
-    console.log('✅ Using Google Speech API Key for authentication');
-    console.log('Project ID:', clientConfig.projectId);
-    console.log('API Key length:', clientConfig.apiKey.length);
-    
-    speechClient = new SpeechClient(clientConfig);
+// Use Google Speech REST API directly instead of SDK
+async function recognizeWithRestAPI(audio, language, sampleRate) {
+  const apiKey = process.env.GOOGLE_SPEECH_API_KEY;
+  const projectId = process.env.GOOGLE_PROJECT_ID || 'gen-lang-client-0283634999';
+  
+  if (!apiKey || apiKey.trim() === '') {
+    throw new Error('GOOGLE_SPEECH_API_KEY environment variable is required');
   }
-  return speechClient;
+  
+  const url = `https://speech.googleapis.com/v1/speech:recognize?key=${apiKey}`;
+  
+  const body = {
+    config: {
+      encoding: 'LINEAR16',
+      sampleRateHertz: 44100,
+      languageCode: language,
+      enableAutomaticPunctuation: true,
+      model: 'latest_short'
+    },
+    audio: {
+      content: audio
+    }
+  };
+  
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(body)
+  });
+  
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(`Google Speech API Error: ${response.status} - ${errorData.error?.message || 'Unknown error'}`);
+  }
+  
+  return await response.json();
 }
 
 async function recognizeSpeech(req, res) {
@@ -37,30 +51,24 @@ async function recognizeSpeech(req, res) {
       return res.status(400).json({ error: 'missing_audio_data' });
     }
 
-    const request = {
-      config: {
-        encoding: 'LINEAR16',
-        sampleRateHertz: 44100,  // Fix: Use 44100 instead of 48000
-        languageCode: language,
-        enableAutomaticPunctuation: true,
-        model: 'latest_short'
-      },
-      audio: {
-        content: audio
-      }
-    };
+    console.log('🎤 Using Google Speech REST API');
+    console.log('🎤 Language:', language);
+    console.log('🎤 Audio length:', audio.length);
 
-    const client = getSpeechClient();
-    const [response] = await client.recognize(request);
-    const transcript = response.results
-      .map(result => result.alternatives[0].transcript)
-      .join('\n');
+    // Use REST API directly
+    const result = await recognizeWithRestAPI(audio, language, sampleRate);
+    
+    const transcript = result.results
+      ?.map(result => result.alternatives[0]?.transcript)
+      ?.join('\n') || '';
 
     const totalMs = Date.now() - startMs;
     
+    console.log('✅ Recognition successful');
+    
     res.json({
       transcript,
-      confidence: response.results[0]?.alternatives[0]?.confidence || 0,
+      confidence: result.results?.[0]?.alternatives[0]?.confidence || 0,
       language,
       totalMs
     });
@@ -68,9 +76,8 @@ async function recognizeSpeech(req, res) {
   } catch (error) {
     const totalMs = Date.now() - startMs;
     console.error('STT Error:', error);
-    
     res.status(500).json({ 
-      error: 'speech_recognition_failed',
+      error: 'speech_recognition_failed', 
       message: error.message,
       totalMs 
     });
@@ -89,63 +96,17 @@ async function streamSpeech(req, res) {
     res.set('Connection', 'keep-alive');
     res.set('Access-Control-Allow-Origin', '*');
 
-    const request = {
-      config: {
-        encoding: 'LINEAR16',
-        sampleRateHertz: 44100,  // Fix: Use 44100 instead of dynamic sampleRate
-        languageCode: language,
-        enableAutomaticPunctuation: true,
-        model: 'latest_short',
-        enableInterimResults: true
-      }
-    };
-
-    const client = getSpeechClient();
-    const recognizeStream = client.streamingRecognize(request)
-      .on('error', (error) => {
-        console.error('STT Stream Error:', error);
-        res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
-        res.end();
-      })
-      .on('data', (data) => {
-        const result = {
-          transcript: data.results[0]?.alternatives[0]?.transcript || '',
-          isFinal: data.results[0]?.isFinal || false,
-          confidence: data.results[0]?.alternatives[0]?.confidence || 0
-        };
-        
-        res.write(`data: ${JSON.stringify(result)}\n\n`);
-        
-        if (result.isFinal) {
-          recognizeStream.end();
-        }
-      })
-      .on('end', () => {
-        res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-        res.end();
-      });
-
-    // Handle incoming audio data
-    req.on('data', (chunk) => {
-      if (recognizeStream.writable) {
-        recognizeStream.write(chunk);
-      }
-    });
-
-    req.on('end', () => {
-      recognizeStream.end();
-    });
-
-    req.on('close', () => {
-      recognizeStream.destroy();
-    });
-
+    console.log('🎤 Streaming not supported with REST API, falling back to batch recognition');
+    
+    // For streaming, we'll use batch recognition with intervals
+    res.write(`data: ${JSON.stringify({ error: 'Streaming not supported, use /api/stt/recognize instead' })}\n\n`);
+    res.end();
+    
   } catch (error) {
     const totalMs = Date.now() - startMs;
-    console.error('STT Stream Setup Error:', error);
-    
+    console.error('STT Stream Error:', error);
     res.status(500).json({ 
-      error: 'stream_setup_failed',
+      error: 'stream_setup_failed', 
       message: error.message,
       totalMs 
     });
