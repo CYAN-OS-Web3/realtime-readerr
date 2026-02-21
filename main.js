@@ -522,12 +522,12 @@ function sendAudioChunkToBackend(chunk, language, sampleRate) {
     audioBuffer.push(chunk);
     console.log(`🎤 Collected audio chunk: ${chunk.length} bytes, total chunks: ${audioBuffer.length}`);
     
-    // Send to backend for batch processing every 2 seconds
+    // Send to backend for batch processing every 3 seconds (increased from 2)
     if (!backendStreamResponse) {
         backendStreamResponse = setTimeout(() => {
-            console.log(`🎤 Triggering batch processing after 2 seconds`);
+            console.log(`🎤 Triggering batch processing after 3 seconds`);
             processAudioBatch(language, sampleRate);
-        }, 2000);
+        }, 3000); // Increased to 3 seconds
     }
 }
 
@@ -540,6 +540,12 @@ async function processAudioBatch(language, sampleRate) {
         const audioBase64 = combinedAudio.toString('base64');
         
         console.log(`🎤 Processing audio batch: ${audioBuffer.length} chunks, ${combinedAudio.length} bytes`);
+        
+        // Only process if we have enough audio (at least 1 second)
+        if (combinedAudio.length < 48000) { // 1 second at 48kHz
+            console.log(`🎤 Audio too short (${combinedAudio.length} bytes), skipping processing`);
+            return;
+        }
         
         // Send to backend for recognition
         const response = await fetch(`${BACKEND_URL}/api/stt/recognize`, {
@@ -564,12 +570,14 @@ async function processAudioBatch(language, sampleRate) {
         
         console.log(`🎤 Backend result:`, result);
         
-        if (result.transcript) {
+        if (result.transcript && result.transcript.trim().length > 0) {
             handleSTTData({
                 transcript: result.transcript,
                 isFinal: true,
                 confidence: result.confidence || 0
             });
+        } else {
+            console.log(`🎤 No speech detected in audio batch`);
         }
 
         if (result.error) {
