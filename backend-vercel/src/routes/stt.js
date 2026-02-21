@@ -10,48 +10,26 @@ function getSpeechClient() {
     console.log('GOOGLE_SPEECH_API_KEY exists:', !!process.env.GOOGLE_SPEECH_API_KEY);
     console.log('GOOGLE_SPEECH_API_KEY length:', process.env.GOOGLE_SPEECH_API_KEY?.length || 0);
     console.log('GOOGLE_PROJECT_ID:', process.env.GOOGLE_PROJECT_ID);
-    console.log('GOOGLE_APPLICATION_CREDENTIALS exists:', !!process.env.GOOGLE_APPLICATION_CREDENTIALS);
     
-    // Try API Key first (highest priority)
+    // Only use API Key method (simplified)
     const apiKey = process.env.GOOGLE_SPEECH_API_KEY;
     
     let clientConfig = {
       projectId: process.env.GOOGLE_PROJECT_ID || null
     };
     
-    // If API Key is provided, use it (preferred method)
+    // API Key is required
     if (apiKey && apiKey.trim() !== '') {
       clientConfig.apiKey = apiKey.trim();
       console.log('✅ Using Google Speech API Key for authentication');
-    } 
-    // Fallback to service account credentials (if API Key not available)
-    else {
-      console.log('❌ API Key not found, falling back to service account credentials');
-      const credentials = process.env.GOOGLE_APPLICATION_CREDENTIALS;
-      
-      if (credentials && credentials.trim().startsWith('{')) {
-        try {
-          const credentialsObj = JSON.parse(credentials);
-          clientConfig.credentials = credentialsObj;
-          console.log('✅ Using parsed service account credentials');
-        } catch (e) {
-          console.error('Failed to parse GOOGLE_APPLICATION_CREDENTIALS JSON:', e);
-          clientConfig.keyFilename = credentials;
-          console.log('✅ Using service account file path');
-        }
-      } else if (credentials) {
-        clientConfig.keyFilename = credentials;
-        console.log('✅ Using service account file path');
-      } else {
-        console.log('❌ No authentication method available');
-      }
+    } else {
+      console.log('❌ GOOGLE_SPEECH_API_KEY not found or empty');
+      throw new Error('GOOGLE_SPEECH_API_KEY environment variable is required');
     }
     
     console.log('Final client config:', {
       projectId: clientConfig.projectId,
-      hasApiKey: !!clientConfig.apiKey,
-      hasCredentials: !!clientConfig.credentials,
-      hasKeyFilename: !!clientConfig.keyFilename
+      hasApiKey: !!clientConfig.apiKey
     });
     
     speechClient = new SpeechClient(clientConfig);
