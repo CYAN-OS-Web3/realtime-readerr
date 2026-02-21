@@ -46,7 +46,7 @@ const ControlHub = () => {
   const [showOverlay, setShowOverlay] = useState(false);
   const [micVolume, setMicVolume] = useState(0);
   const [sensitivity, setSensitivity] = useState(50);
-  const [ttsEngine, setTtsEngine] = useState('azure');
+  const [ttsEngine, setTtsEngine] = useState('google');
   const [backendUrl, setBackendUrl] = useState('');
   const [installId, setInstallId] = useState('');
   const [voiceOrderId, setVoiceOrderId] = useState('');
