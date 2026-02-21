@@ -73,7 +73,7 @@ async function recognizeSpeech(req, res) {
     const request = {
       config: {
         encoding: 'LINEAR16',
-        sampleRateHertz: sampleRate,
+        sampleRateHertz: 44100,  // Fix: Use 44100 instead of 48000
         languageCode: language,
         enableAutomaticPunctuation: true,
         model: 'latest_short'
@@ -125,7 +125,7 @@ async function streamSpeech(req, res) {
     const request = {
       config: {
         encoding: 'LINEAR16',
-        sampleRateHertz: parseInt(sampleRate),
+        sampleRateHertz: 44100,  // Fix: Use 44100 instead of dynamic sampleRate
         languageCode: language,
         enableAutomaticPunctuation: true,
         model: 'latest_short',
