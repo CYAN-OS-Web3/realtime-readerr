@@ -99,7 +99,7 @@ let overlayWindow = null;
 let currentSettings = {
     sourceLang: 'en-US', 
     targetLang: 'vi', 
-    ttsEngine: 'elevenlabs',
+    ttsEngine: 'google',
     sensitivity: 50
 };
 let isStreaming = false;
