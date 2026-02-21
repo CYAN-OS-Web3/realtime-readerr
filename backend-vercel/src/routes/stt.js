@@ -5,29 +5,34 @@ let speechClient = null;
 
 function getSpeechClient() {
   if (!speechClient) {
-    // Try API Key first, then fallback to service account
+    // Try API Key first (highest priority)
     const apiKey = process.env.GOOGLE_SPEECH_API_KEY;
-    const credentials = process.env.GOOGLE_APPLICATION_CREDENTIALS;
     
     let clientConfig = {
       projectId: process.env.GOOGLE_PROJECT_ID || null
     };
     
-    // If API Key is provided, use it
-    if (apiKey) {
-      clientConfig.apiKey = apiKey;
+    // If API Key is provided, use it (preferred method)
+    if (apiKey && apiKey.trim() !== '') {
+      clientConfig.apiKey = apiKey.trim();
+      console.log('Using Google Speech API Key for authentication');
     } 
-    // Else try service account credentials
-    else if (credentials && credentials.trim().startsWith('{')) {
-      try {
-        const credentialsObj = JSON.parse(credentials);
-        clientConfig.credentials = credentialsObj;
-      } catch (e) {
-        console.error('Failed to parse GOOGLE_APPLICATION_CREDENTIALS JSON:', e);
+    // Fallback to service account credentials (if API Key not available)
+    else {
+      console.log('API Key not found, falling back to service account credentials');
+      const credentials = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+      
+      if (credentials && credentials.trim().startsWith('{')) {
+        try {
+          const credentialsObj = JSON.parse(credentials);
+          clientConfig.credentials = credentialsObj;
+        } catch (e) {
+          console.error('Failed to parse GOOGLE_APPLICATION_CREDENTIALS JSON:', e);
+          clientConfig.keyFilename = credentials;
+        }
+      } else if (credentials) {
         clientConfig.keyFilename = credentials;
       }
-    } else if (credentials) {
-      clientConfig.keyFilename = credentials;
     }
     
     speechClient = new SpeechClient(clientConfig);
