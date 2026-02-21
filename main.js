@@ -54,16 +54,17 @@ const isDev = process.env.NODE_ENV === 'development' || process.argv.includes('-
 // Ensure autoplay works without user gesture during streaming
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
-const { SpeechClient } = require('@google-cloud/speech');
+// const { SpeechClient } = require('@google-cloud/speech'); // No longer needed - using backend API
 const { Translate } = require('@google-cloud/translate').v2;
 const { TextToSpeechClient } = require('@google-cloud/text-to-speech');
 const https = require('https'); 
 const sdk = require('microsoft-cognitiveservices-speech-sdk'); 
+const fetch = require('node-fetch'); 
 
 // =====================================================================
-// !!! FIX BẮT BUỘC LỖI XÁC THỰC GOOGLE !!!
+// !!! GOOGLE CREDENTIALS - NO LONGER NEEDED IN ELECTRON !!!
 // =====================================================================
-process.env.GOOGLE_APPLICATION_CREDENTIALS = process.env.GOOGLE_APPLICATION_CREDENTIALS || '';
+// process.env.GOOGLE_APPLICATION_CREDENTIALS = process.env.GOOGLE_APPLICATION_CREDENTIALS || path.join(__dirname, 'google-credentials.json');
 
 
 // =========================================================
@@ -72,8 +73,7 @@ process.env.GOOGLE_APPLICATION_CREDENTIALS = process.env.GOOGLE_APPLICATION_CRED
 // *********************************************************
 // THAY THẾ KEY VÀ VOICE ID THỰC TẾ CỦA BẠN VÀO ĐÂY
 // *********************************************************
-const BACKEND_URL = (process.env.BACKEND_URL || (isDev ? 'http://localhost:3000' : 'https://translator-backend-pi.vercel.app')).toString().trim();
-// const BACKEND_URL = 'http://localhost:3000'; // FORCE LOCALHOST FOR TESTING
+const BACKEND_URL = (process.env.BACKEND_URL || 'https://translator-backend-pi.vercel.app').toString().trim();
 const CYAN_USER_ID = (process.env.CYAN_USER_ID || '').toString().trim();
 const projectId = (process.env.GCP_PROJECT_ID || '').toString().trim();
 
@@ -89,7 +89,7 @@ const AZURE_PREFERRED_GENDER = 'male';
 // =========================================================
 // 3. KHỞI TẠO CLIENT VÀ BIẾN TOÀN CỤC
 // =========================================================
-const speechClient = projectId ? new SpeechClient({ projectId: projectId }) : new SpeechClient();
+// const speechClient = projectId ? new SpeechClient({ projectId: projectId }) : new SpeechClient(); // No longer needed
 const translateClient = projectId ? new Translate({ projectId: projectId }) : new Translate();
 const ttsClient = new TextToSpeechClient(); 
 
@@ -481,86 +481,172 @@ function startStream(sourceLangCode, sampleRate = 16000) {
     }
     
     sendToRenderer('log-message', `Chuẩn bị khởi tạo STT Stream. Code: ${sourceLangCode}, Rate: ${sampleRate}Hz`, 'info');
-    sendToRenderer('log-message', `Khởi tạo Google STT Stream cho ngôn ngữ: ${sourceLangCode}`, 'info');
+    sendToRenderer('log-message', `Khởi tạo Backend STT Stream cho ngôn ngữ: ${sourceLangCode}`, 'info');
 
-    const request = {
-        config: {
-            encoding: 'LINEAR16',
-            sampleRateHertz: sampleRate,
-            languageCode: sourceLangCode,
-            model: 'latest_long',
-            maxAlternatives: 1,
-            useEnhanced: true,
-            enableAutomaticPunctuation: true,
-            enableWordTimeOffsets: false
+    // Create backend streaming connection
+    recognizeStream = {
+        write: (chunk) => {
+            // Send audio chunk to backend
+            sendAudioChunkToBackend(chunk, sourceLangCode, sampleRate);
         },
-        interimResults: true,
-        singleUtterance: true
+        end: () => {
+            // End streaming
+            endBackendStream();
+        },
+        on: (event, callback) => {
+            // Handle events
+            if (event === 'error') {
+                recognizeStream.errorCallback = callback;
+            } else if (event === 'data') {
+                recognizeStream.dataCallback = callback;
+            } else if (event === 'end') {
+                recognizeStream.endCallback = callback;
+            }
+        },
+        writable: true,
+        destroy: () => {
+            recognizeStream = null;
+        }
     };
 
-    recognizeStream = speechClient
-        .streamingRecognize(request)
-        .on('error', (err) => {
-             const detail = (err && (err.details || err.message)) ? (err.details || err.message) : JSON.stringify(err);
-             if (typeof detail === 'string' && /write after end/i.test(detail)) {
-                 sendToRenderer('log-message', `STT Stream WARNING: ${detail}`, 'info');
-                 return;
-             }
-             sendToRenderer('log-message', `STT Stream ERROR: ${detail}`, 'error');
-             stopStream(); 
-             isStreaming = false;
-        })
-        .on('end', () => {
-            if (!didTranslateForUtterance) {
-                const textToTranslate = lastFinalTranscript || lastPartialTranscript;
-                if (textToTranslate && textToTranslate.trim().length > 0) {
-                    translateAndSpeak(textToTranslate, currentSettings.targetLang, currentSettings.ttsEngine);
-                }
-            }
-            lastPartialTranscript = '';
-            lastFinalTranscript = '';
-            didTranslateForUtterance = false;
-            sttFinalizing = false;
-            if (isStreaming) {
-                startStream(currentSettings.sourceLang, currentSettings.sampleRate);
-            }
-        })
-        .on('data', (data) => {
-            const result = data.results[0];
-            
-            if (result && result.alternatives && result.alternatives[0]) {
-                const transcript = result.alternatives[0].transcript;
-                const isFinal = result.isFinal;
-                
-                sendToRenderer('stt-transcript', {
-                    transcript: transcript,
-                    isFinal: isFinal
-                });
-
-                if (isFinal) {
-                    translateAndSpeak(transcript, currentSettings.targetLang, currentSettings.ttsEngine);
-                    sttLastSentIdx = 0;
-                    sttLastSendTs = Date.now();
-                    lastFinalTranscript = transcript;
-                    lastPartialTranscript = '';
-                    didTranslateForUtterance = true;
-                } else {
-                    lastPartialTranscript = transcript;
-                }
-            }
-            if (data && data.speechEventType === 'END_OF_SINGLE_UTTERANCE') {
-                if (!didTranslateForUtterance) {
-                    const textToTranslate = lastFinalTranscript || lastPartialTranscript;
-                    if (textToTranslate && textToTranslate.trim().length > 0) {
-                        translateAndSpeak(textToTranslate, currentSettings.targetLang, currentSettings.ttsEngine);
-                        didTranslateForUtterance = true;
-                    }
-                }
-            }
-        });
-        
     isStreaming = true;
     sendToRenderer('log-message', 'STT Stream đã BẮT ĐẦU. Đang chờ âm thanh...', 'success');
+}
+
+// Backend STT streaming functions
+let backendStreamResponse = null;
+let audioBuffer = [];
+
+function sendAudioChunkToBackend(chunk, language, sampleRate) {
+    // Collect audio chunks
+    audioBuffer.push(chunk);
+    console.log(`🎤 Collected audio chunk: ${chunk.length} bytes, total chunks: ${audioBuffer.length}`);
+    
+    // Send to backend for batch processing every 2 seconds
+    if (!backendStreamResponse) {
+        backendStreamResponse = setTimeout(() => {
+            console.log(`🎤 Triggering batch processing after 2 seconds`);
+            processAudioBatch(language, sampleRate);
+        }, 2000);
+    }
+}
+
+async function processAudioBatch(language, sampleRate) {
+    if (audioBuffer.length === 0) return;
+    
+    try {
+        // Combine all audio chunks
+        const combinedAudio = Buffer.concat(audioBuffer);
+        const audioBase64 = combinedAudio.toString('base64');
+        
+        console.log(`🎤 Processing audio batch: ${audioBuffer.length} chunks, ${combinedAudio.length} bytes`);
+        
+        // Send to backend for recognition
+        const response = await fetch(`${BACKEND_URL}/api/stt/recognize`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                audio: audioBase64,
+                language: language,
+                sampleRate: sampleRate
+            })
+        });
+
+        console.log(`🎤 Backend response status: ${response.status}`);
+
+        if (!response.ok) {
+            throw new Error(`Backend STT error: ${response.status}`);
+        }
+
+        const result = await response.json();
+        
+        console.log(`🎤 Backend result:`, result);
+        
+        if (result.transcript) {
+            handleSTTData({
+                transcript: result.transcript,
+                isFinal: true,
+                confidence: result.confidence || 0
+            });
+        }
+
+        if (result.error) {
+            handleSTTData({ error: result.error });
+        }
+
+    } catch (error) {
+        console.error('Backend STT batch error:', error);
+        sendToRenderer('log-message', `STT ERROR: ${error.message}`, 'error');
+        if (recognizeStream && recognizeStream.errorCallback) {
+            recognizeStream.errorCallback(error);
+        }
+    } finally {
+        // Clear buffer and reset timer
+        audioBuffer = [];
+        backendStreamResponse = null;
+        
+        // Continue processing if still streaming
+        if (isStreaming) {
+            backendStreamResponse = setTimeout(() => {
+                processAudioBatch(language, sampleRate);
+            }, 2000);
+        }
+    }
+}
+
+function handleSTTData(data) {
+    if (data.done) {
+        if (recognizeStream && recognizeStream.endCallback) {
+            recognizeStream.endCallback();
+        }
+        return;
+    }
+
+    if (data.error) {
+        sendToRenderer('log-message', `STT Stream ERROR: ${data.error}`, 'error');
+        if (recognizeStream && recognizeStream.errorCallback) {
+            recognizeStream.errorCallback(new Error(data.error));
+        }
+        return;
+    }
+
+    const transcript = data.transcript || '';
+    const isFinal = data.isFinal || false;
+
+    if (isFinal) {
+        lastFinalTranscript = transcript;
+        sendToRenderer('stt-final', transcript);
+        sendToRenderer('log-message', `Nhận được transcript (final): ${transcript}`, 'info');
+        if (!didTranslateForUtterance) {
+            translateAndSpeak(transcript, currentSettings.targetLang, currentSettings.ttsEngine);
+            didTranslateForUtterance = true;
+        }
+    } else {
+        lastPartialTranscript = transcript;
+        sendToRenderer('stt-partial', transcript);
+        if (transcript.trim().length > 0) {
+            sendToRenderer('log-message', `Nhận được transcript (partial): ${transcript}`, 'info');
+        }
+    }
+
+    if (recognizeStream && recognizeStream.dataCallback) {
+        recognizeStream.dataCallback({
+            results: [{
+                alternatives: [{ transcript }],
+                isFinal
+            }]
+        });
+    }
+}
+
+function endBackendStream() {
+    if (backendStreamResponse) {
+        clearTimeout(backendStreamResponse);
+        backendStreamResponse = null;
+    }
+    audioBuffer = [];
 }
 
 function stopStream() {
@@ -569,6 +655,11 @@ function stopStream() {
         recognizeStream = null;
         isStreaming = false;
     }
+    endBackendStream();
+    sttFinalizing = false;
+    lastPartialTranscript = '';
+    lastFinalTranscript = '';
+    didTranslateForUtterance = false;
 }
 
 ipcMain.on('audio-chunk', (event, chunk) => {

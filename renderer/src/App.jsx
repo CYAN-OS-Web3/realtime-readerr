@@ -788,28 +788,25 @@ const ControlHub = () => {
                    <X className="w-3 h-3 text-cyan-100 group-hover:text-red-300" />
                  </button>
                </div>
-             ) : (
-               <button 
-                 onClick={(e) => {
-                    // Alt + Click to enter manual User ID (Developer Mode / Test Mode)
-                    if (e.altKey) {
-                        const manualId = '102870395312994795443'; // Default for dev mode
-                        // const manualId = prompt('Enter Manual User ID (Dev Mode):', '102870395312994795443');
-                        if (manualId) {
-                            setAuthUserId(manualId);
-                            setInstallId(manualId);
-                            localStorage.setItem('installId', manualId);
-                        }
-                    } else {
-                        window.electronAPI?.openExternal?.('https://cyan-os-landingpage.vercel.app/login');
-                    }
-                 }}
-                 className="flex items-center gap-1.5 px-2 py-1 bg-black/20 hover:bg-black/40 rounded-full transition-all text-xs text-white font-medium"
-                 title="Alt+Click for Manual Login"
-               >
-                 <span>Login</span>
-               </button>
-             )}
+            ) : (
+              <button
+                onClick={(e) => {
+                  if (e.altKey) {
+                    const manualId = '102870395312994795443'
+                    setAuthUserId(manualId)
+                    setInstallId(manualId)
+                    localStorage.setItem('installId', manualId)
+                    return
+                  }
+
+                  window.electronAPI?.openExternal?.('https://cyan-os-landingpage.vercel.app/login?autoOpenApp=1')
+                }}
+                className="flex items-center gap-1.5 px-2 py-1 bg-black/20 hover:bg-black/40 rounded-full transition-all text-xs text-white font-medium"
+                title="Login (Alt+Click for Dev)"
+              >
+                <span>Login</span>
+              </button>
+            )}
 
             <div className="h-4 w-px bg-cyan-500/50 mx-1"></div>
 

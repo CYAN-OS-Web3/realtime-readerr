@@ -10,7 +10,9 @@
     "start:renderer": "cd renderer && npm run dev",
     "build": "echo \"No build required for backend deploy\"",
     "package": "electron-builder",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "mcp:start": "node start-mcp.js",
+    "mcp:cyan": "node mcp-server.js"
   },
   "keywords": [
     "translation",
@@ -40,12 +42,20 @@
     "@deepgram/sdk": "^3.8.0",
     "@electron/remote": "^2.1.2",
     "@google-cloud/text-to-speech": "^6.4.0",
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "@modelcontextprotocol/server-filesystem": "^2026.1.14",
+    "@modelcontextprotocol/server-github": "^2025.4.8",
+    "@modelcontextprotocol/server-memory": "^2026.1.26",
+    "@modelcontextprotocol/server-postgres": "^0.6.2",
+    "@modelcontextprotocol/server-sequential-thinking": "^2025.12.18",
+    "@supabase/mcp-server-supabase": "^0.6.3",
     "@supabase/supabase-js": "^1.35.7",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "elevenlabs": "^1.59.0",
     "express": "^4.18.2",
-    "form-data": "^4.0.0",
+    "form-data": "^4.0.5",
+    "git-mcp-server": "^1.0.0",
     "lucide-react": "^0.561.0",
     "microsoft-cognitiveservices-speech-sdk": "^1.47.0",
     "multer": "^1.4.5-lts.1",
@@ -54,7 +64,6 @@
     "react-dom": "^19.2.3"
   },
   "devDependencies": {
-    "electron": "^28.1.0",
     "@babel/core": "^7.28.5",
     "@babel/plugin-proposal-class-properties": "^7.18.6",
     "@babel/plugin-transform-runtime": "^7.28.5",
@@ -63,6 +72,7 @@
     "@babel/runtime": "^7.28.4",
     "autoprefixer": "^10.4.23",
     "concurrently": "^9.2.1",
+    "electron": "^28.1.0",
     "electron-builder": "^26.0.12",
     "electron-rebuild": "3.2.9",
     "eslint": "^8.56.0",
