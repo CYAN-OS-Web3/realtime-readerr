@@ -382,8 +382,6 @@ async function callAzureTTSService(text, targetLang) {
 
 async function callGoogleWaveNetTTSService(text, targetLang) {
     try {
-        // Ánh xạ mã ngôn ngữ đầy đủ cho Google TTS
-        // Mặc định là [lang]-[REGION]
         const langCodeMap = {
             'en': 'en-US', 'vi': 'vi-VN', 'es': 'es-ES', 'fr': 'fr-FR', 'de': 'de-DE',
             'it': 'it-IT', 'pt': 'pt-PT', 'ru': 'ru-RU', 'ja': 'ja-JP', 'ko': 'ko-KR',
@@ -397,42 +395,38 @@ async function callGoogleWaveNetTTSService(text, targetLang) {
 
         const languageCode = langCodeMap[targetLang] || 'en-US';
         
-        // CHỌN GIỌNG WAVENET CAO CẤP
-        // Nếu không có trong map cụ thể, thử tạo tên giọng theo quy tắc chuẩn
-        const voiceMap = {
-            'en': 'en-US-Wavenet-D', 
-            'vi': 'vi-VN-Wavenet-A', 
-            'es': 'es-ES-Wavenet-D', 
-            // Các ngôn ngữ khác sẽ tự động dùng Wavenet-A hoặc Standard-A
-        };
-
-        let voiceName = voiceMap[targetLang];
+        console.log(`🔊 Calling Backend TTS API: "${text}" -> ${languageCode}`);
         
-        if (!voiceName) {
-            // Thử tạo tên giọng mặc định: [LanguageCode]-Wavenet-A
-            // Lưu ý: Một số ngôn ngữ có thể không có Wavenet, fallback về Standard
-            voiceName = `${languageCode}-Wavenet-A`;
+        const response = await fetch(`${BACKEND_URL}/api/tts/speak`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                text: text,
+                language: languageCode,
+                gender: 'female',
+                user_id: 'electron-user-123'
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`Backend TTS error: ${response.status}`);
         }
 
-        const request = {
-            input: { text: text },
-            voice: { languageCode: languageCode, name: voiceName },
-            audioConfig: { audioEncoding: 'MP3' },
-        };
-
-        const [response] = await ttsClient.synthesizeSpeech(request);
+        const result = await response.json();
         
-        if (response.audioContent) {
-            const audioBuffer = Buffer.from(response.audioContent);
+        if (result.audio) {
+            const audioBuffer = Buffer.from(result.audio, 'base64');
             sendToRenderer('tts-audio-ready', new Uint8Array(audioBuffer));
-            sendToRenderer('log-message', `Google WaveNet TTS: Phát thành công bằng giọng ${voiceName}.`, 'success');
+            sendToRenderer('log-message', `Backend TTS: Phát thành công (${languageCode}).`, 'success');
         } else {
-            sendToRenderer('log-message', 'Lỗi WaveNet TTS: Không nhận được nội dung âm thanh.', 'error');
+            sendToRenderer('log-message', 'Lỗi Backend TTS: Không nhận được nội dung âm thanh.', 'error');
         }
 
     } catch (e) {
-        sendToRenderer('log-message', `Lỗi kết nối/gọi WaveNet TTS: ${e.message}`, 'error');
-        console.error('WaveNet TTS Error:', e);
+        sendToRenderer('log-message', `Lỗi kết nối/gọi Backend TTS: ${e.message}`, 'error');
+        console.error('Backend TTS Error:', e);
     }
 }
 
