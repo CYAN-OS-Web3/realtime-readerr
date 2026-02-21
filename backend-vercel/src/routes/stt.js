@@ -5,10 +5,29 @@ let speechClient = null;
 
 function getSpeechClient() {
   if (!speechClient) {
-    speechClient = new SpeechClient({
-      keyFilename: process.env.GOOGLE_APPLICATION_CREDENTIALS || null,
+    // Check if credentials are provided as JSON string or file path
+    const credentials = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+    
+    let clientConfig = {
       projectId: process.env.GOOGLE_PROJECT_ID || null
-    });
+    };
+    
+    // If credentials look like JSON (starts with {), parse them
+    if (credentials && credentials.trim().startsWith('{')) {
+      try {
+        const credentialsObj = JSON.parse(credentials);
+        clientConfig.credentials = credentialsObj;
+      } catch (e) {
+        console.error('Failed to parse GOOGLE_APPLICATION_CREDENTIALS JSON:', e);
+        // Fallback to file path
+        clientConfig.keyFilename = credentials;
+      }
+    } else if (credentials) {
+      // Use as file path
+      clientConfig.keyFilename = credentials;
+    }
+    
+    speechClient = new SpeechClient(clientConfig);
   }
   return speechClient;
 }
