@@ -5,25 +5,28 @@ let speechClient = null;
 
 function getSpeechClient() {
   if (!speechClient) {
-    // Check if credentials are provided as JSON string or file path
+    // Try API Key first, then fallback to service account
+    const apiKey = process.env.GOOGLE_SPEECH_API_KEY;
     const credentials = process.env.GOOGLE_APPLICATION_CREDENTIALS;
     
     let clientConfig = {
       projectId: process.env.GOOGLE_PROJECT_ID || null
     };
     
-    // If credentials look like JSON (starts with {), parse them
-    if (credentials && credentials.trim().startsWith('{')) {
+    // If API Key is provided, use it
+    if (apiKey) {
+      clientConfig.apiKey = apiKey;
+    } 
+    // Else try service account credentials
+    else if (credentials && credentials.trim().startsWith('{')) {
       try {
         const credentialsObj = JSON.parse(credentials);
         clientConfig.credentials = credentialsObj;
       } catch (e) {
         console.error('Failed to parse GOOGLE_APPLICATION_CREDENTIALS JSON:', e);
-        // Fallback to file path
         clientConfig.keyFilename = credentials;
       }
     } else if (credentials) {
-      // Use as file path
       clientConfig.keyFilename = credentials;
     }
     
