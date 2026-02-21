@@ -4,6 +4,7 @@ const gtts = require('../lib/google')
 const aztts = require('../lib/azure')
 const ttsRouter = require('../os/ttsRouter')
 const telemetry = require('../os/telemetry')
+const watermark = require('../os/watermark')
 const auth = require('../auth')
 
 async function speak(req, res){
@@ -195,12 +196,14 @@ async function speakPcmStream(req, res){
     res.set('Transfer-Encoding','chunked')
     if (typeof res.flushHeaders === 'function') res.flushHeaders()
     const stream = await eleven.speakPcmStream(voiceId, text, 16000)
+    const meta = { userId, deviceId, transactionId: null }
+    const wrapped = watermark.wrapPcmStreamWithWatermark(stream, meta)
     const onClose = async () => { try{ stream.destroy() }catch(_){} }
     req.on('close', onClose)
     req.on('aborted', onClose)
-    stream.on('error', () => { try{ res.end() }catch(_){} })
-    stream.pipe(res)
-    stream.on('end', async () => {
+    wrapped.on('error', () => { try{ res.end() }catch(_){} })
+    wrapped.pipe(res)
+    wrapped.on('end', async () => {
       const totalMs = Date.now() - startMs
       try{ res.end() }catch(_){}
       await telemetry.logEvent(ctx, 'tts_speak_pcm_stream', { plan, provider, chain, chars, language: languageCode, total_ms: totalMs })

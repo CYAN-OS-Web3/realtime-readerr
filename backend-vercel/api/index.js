@@ -2,6 +2,7 @@ const express = require('express')
 const cors = require('cors')
 const multer = require('multer')
 const ttsRoutes = require('../src/routes/tts')
+const sttRoutes = require('../src/routes/stt')
 const user = require('../src/user')
 const payment = require('../src/payment')
 const voice = require('../src/voice')
@@ -89,7 +90,11 @@ app.post('/api/voice/assign', upload.single('sample'), voice.assignVoice)
 app.post('/api/voice/update', upload.single('sample'), voice.updateVoice)
 app.post('/api/voice/update/complete', upload.single('sample'), voice.completeVoiceUpdate)
 app.post('/api/payment/voice-change/capture', payment.captureVoiceChangeOrder)
-app.get('/api/fake-pay', payment.fakePaymentPage) // Add fake payment route
+app.post('/api/fake-pay', payment.fakePaymentPage) // Add fake payment route
+
+// STT (Speech-to-Text) endpoints
+app.post('/api/stt/recognize', sttRoutes.recognizeSpeech)
+app.post('/api/stt/stream', sttRoutes.streamSpeech)
 
 // Test endpoint for debugging
 app.get('/api/test', require('./test'))
