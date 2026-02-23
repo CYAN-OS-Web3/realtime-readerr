@@ -69,8 +69,5 @@ Once the virtual microphone is installed:
 4. Open the app in a browser, select the language, and start transcription and translation using the UI.
 
 
-## Demo video (this is what the other person in the meeting will hear):
-
-https://github.com/user-attachments/assets/0e7a4baf-a684-440c-be93-24509547d4ba
 
 
