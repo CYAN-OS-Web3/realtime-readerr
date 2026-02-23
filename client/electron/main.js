@@ -1,6 +1,17 @@
 const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('path');
 const url = require('url');
+const fs = require('fs');
+
+const defaultUserData = app.getPath('userData');
+const customUserData = path.join(defaultUserData, 'CyanDev');
+try {
+  fs.mkdirSync(customUserData, { recursive: true });
+} catch {}
+app.setPath('userData', customUserData);
+app.commandLine.appendSwitch('disk-cache-dir', path.join(customUserData, 'Cache'));
+app.commandLine.appendSwitch('media-cache-dir', path.join(customUserData, 'MediaCache'));
+app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
 
 const isDev = process.env.NODE_ENV === 'development' || process.argv.includes('--dev');
 
@@ -168,7 +179,7 @@ function createWindow() {
     webPreferences: { nodeIntegration: false, contextIsolation: true, enableRemoteModule: false, webSecurity: !isDev, backgroundThrottling: false, webviewTag: true, preload: path.join(__dirname, 'preload.js') },
     title: 'Cyan ULTRA-LOW LATENCY AI TRANSLATOR', icon: path.join(__dirname, 'assets/icon.png')
   });
-  const startUrl = isDev ? 'http://localhost:5173' : `file://${path.resolve(__dirname, '../renderer/dist/index.html')}`;
+  const startUrl = isDev ? 'http://localhost:5174' : `file://${path.resolve(__dirname, '../renderer/dist/index.html')}`;
   mainWindow.loadURL(startUrl);
   if (isDev) mainWindow.webContents.openDevTools({ mode: 'detach' });
   mainWindow.webContents.on('did-finish-load', () => { rendererAlive = true; suppressRendererIpc = false; });

@@ -3,6 +3,17 @@
 const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('path');
 const url = require('url');
+const fs = require('fs');
+
+const defaultUserData = app.getPath('userData');
+const customUserData = path.join(defaultUserData, 'CyanDev');
+try {
+  fs.mkdirSync(customUserData, { recursive: true });
+} catch {}
+app.setPath('userData', customUserData);
+app.commandLine.appendSwitch('disk-cache-dir', path.join(customUserData, 'Cache'));
+app.commandLine.appendSwitch('media-cache-dir', path.join(customUserData, 'MediaCache'));
+app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
 
 // Deep Link Setup
 if (process.defaultApp) {
@@ -436,9 +447,14 @@ async function callGoogleWaveNetTTSService(text, targetLang) {
 // =========================================================
 async function translateAndSpeak(text, targetLang, ttsEngine) {
     try {
-        const [translation] = await translateClient.translate(text, targetLang);
+        console.log(`🔄 Starting translation: "${text}" -> ${targetLang}`);
+        
+        // Parallel translation and TTS preparation
+        const translationPromise = translateClient.translate(text, targetLang);
+        const [translation] = await translationPromise;
         const translatedText = translation;
 
+        console.log(`✅ Translation complete: "${translatedText}"`);
         sendToRenderer('translation:update', { 
             sourceText: text, 
             translatedText: translatedText 
@@ -450,6 +466,8 @@ async function translateAndSpeak(text, targetLang, ttsEngine) {
             }
         } catch (e) {}
 
+        // Start TTS immediately after translation
+        console.log(`🔊 Starting TTS with engine: ${ttsEngine}`);
         if (ttsEngine === 'elevenlabs') {
             console.log(`🔊 Using ElevenLabs TTS engine`);
             await callElevenLabsTTSService(translatedText, targetLang);
@@ -515,18 +533,67 @@ function startStream(sourceLangCode, sampleRate = 16000) {
 // Backend STT streaming functions
 let backendStreamResponse = null;
 let audioBuffer = [];
+let lastProcessTime = 0;
+const MIN_CHUNK_INTERVAL = 500; // Process every 500ms minimum
+const MIN_CHUNK_SIZE = 12000; // 250ms at 48kHz
 
 function sendAudioChunkToBackend(chunk, language, sampleRate) {
-    // Collect audio chunks
+    // Add to buffer for smart processing
     audioBuffer.push(chunk);
-    console.log(`🎤 Collected audio chunk: ${chunk.length} bytes, total chunks: ${audioBuffer.length}`);
+    const now = Date.now();
     
-    // Send to backend for batch processing every 3 seconds (increased from 2)
-    if (!backendStreamResponse) {
-        backendStreamResponse = setTimeout(() => {
-            console.log(`🎤 Triggering batch processing after 3 seconds`);
-            processAudioBatch(language, sampleRate);
-        }, 3000); // Increased to 3 seconds
+    console.log(`🎤 Audio chunk received: ${chunk.length} bytes, buffer: ${audioBuffer.length} chunks`);
+    
+    // Process immediately if buffer is large enough or enough time passed
+    const totalSize = audioBuffer.reduce((sum, buf) => sum + buf.length, 0);
+    const timeSinceLastProcess = now - lastProcessTime;
+    
+    if (totalSize >= MIN_CHUNK_SIZE || timeSinceLastProcess >= MIN_CHUNK_INTERVAL) {
+        console.log(`🎤 Triggering real-time processing (${totalSize} bytes, ${timeSinceLastProcess}ms)`);
+        const combinedChunk = Buffer.concat(audioBuffer);
+        processAudioChunk(combinedChunk, language, sampleRate);
+        audioBuffer = [];
+        lastProcessTime = now;
+    }
+}
+
+async function processAudioChunk(chunk, language, sampleRate) {
+    try {
+        // Convert chunk to base64 immediately
+        const audioBase64 = chunk.toString('base64');
+        
+        console.log(`🎤 Processing real-time chunk: ${chunk.length} bytes`);
+        
+        // Send to backend for immediate recognition
+        const response = await fetch(`${BACKEND_URL}/api/stt/recognize`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                audio: audioBase64,
+                language: language,
+                sampleRate: sampleRate
+            })
+        });
+
+        console.log(`🎤 Real-time backend response: ${response.status}`);
+
+        if (response.ok) {
+            const result = await response.json();
+            console.log(`🎤 Real-time result:`, result);
+            
+            if (result.transcript && result.transcript.trim().length > 0) {
+                handleSTTData({
+                    transcript: result.transcript,
+                    isFinal: true,
+                    confidence: result.confidence || 0
+                });
+            }
+        }
+    } catch (error) {
+        console.error('🎤 Real-time processing error:', error);
+        // Don't show error to user for real-time chunks to avoid spam
     }
 }
 
@@ -793,7 +860,7 @@ function createWindow() {
     });
 
     const startUrl = isDev
-        ? 'http://localhost:5173'
+        ? 'http://localhost:5174'
         : `file://${path.join(__dirname, 'renderer/dist/index.html')}`;
 
     mainWindow.loadURL(startUrl);
