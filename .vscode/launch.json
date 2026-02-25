@@ -35,6 +35,20 @@
       "request": "launch",
       "command": "npm run doctor:remote:auto",
       "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Build Electron App",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npm run package",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Quick Test Build (skip checks)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npm run doctor:remote:auto:quick && npm run package",
+      "cwd": "${workspaceFolder}"
     }
   ]
 }
