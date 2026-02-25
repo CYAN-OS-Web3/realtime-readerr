@@ -82,7 +82,7 @@ const ControlHub = () => {
   const [inputDeviceId, setInputDeviceId] = useState('');
   const [audioOutputs, setAudioOutputs] = useState([]);
   const [outputDeviceId, setOutputDeviceId] = useState('default');
-  const [noiseReduction, setNoiseReduction] = useState(true);
+  const [noiseReduction, setNoiseReduction] = useState(false); // Default OFF for testing
   const [noiseGateMode, setNoiseGateMode] = useState('adaptive'); // adaptive, manual, off
   const [ambientNoiseLevel, setAmbientNoiseLevel] = useState(0);
 
@@ -543,40 +543,11 @@ const ControlHub = () => {
         console.log('WorkletNode created:', !!workletNode);
         console.log('processorRef.current set:', !!processorRef.current);
 
-        if (noiseReduction) { // Enable lại noise reduction
-            // Advanced noise reduction chain
-            const hp = audioCtx.createBiquadFilter();
-            hp.type = 'highpass';
-            hp.frequency.setValueAtTime(80, audioCtx.currentTime); // Lower cutoff for better voice
-            
-            const lp = audioCtx.createBiquadFilter();
-            lp.type = 'lowpass';
-            lp.frequency.setValueAtTime(8000, audioCtx.currentTime);
-            
-            // Add noise gate for coffee shop environments
-            const noiseGate = audioCtx.createGain();
-            noiseGate.gain.setValueAtTime(0, audioCtx.currentTime);
-            
-            // Add expander for better dynamics
-            const expander = audioCtx.createDynamicsCompressor();
-            expander.threshold.setValueAtTime(-30, audioCtx.currentTime);
-            expander.ratio.setValueAtTime(12, audioCtx.currentTime); // Fixed: ratio must be 1-20
-            expander.attack.setValueAtTime(0.001, audioCtx.currentTime);
-            expander.release.setValueAtTime(0.1, audioCtx.currentTime);
-            
-            source.connect(compressor);
-            compressor.connect(hp);
-            hp.connect(lp);
-            lp.connect(expander);
-            expander.connect(noiseGate);
-            noiseGate.connect(gainNode);
-            
-            // Store noise gate reference for adaptive control
-            noiseGateRef.current = noiseGate;
-        } else {
-            source.connect(compressor);
-            compressor.connect(gainNode);
-        }
+        // SIMPLE AUDIO CHAIN - NO NOISE REDUCTION
+        source.connect(compressor);
+        compressor.connect(gainNode);
+        
+        console.log('Simple audio chain: source → compressor → gainNode → worklet');
         gainNode.connect(workletNode);
 
         const lastVoiceAtRef = { t: Date.now() };
