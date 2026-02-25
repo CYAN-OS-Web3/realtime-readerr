@@ -500,7 +500,7 @@ const ControlHub = () => {
         sourceRef.current = source;
 
         const gainNode = audioCtx.createGain();
-        gainNode.gain.setValueAtTime(10.0, audioCtx.currentTime); // Tăng gain lên 10x
+        gainNode.gain.setValueAtTime(20.0, audioCtx.currentTime); // Tăng gain lên 20x cho voice
         gainNodeRef.current = gainNode;
         console.log("Gain node created with gain:", gainNode.gain.value);
 
@@ -599,7 +599,7 @@ const ControlHub = () => {
             let effectiveThreshold;
             if (noiseGateMode === 'adaptive') {
                 // Dynamic threshold based on ambient noise
-                const noiseMultiplier = 1.5; // Voice should be 50% above ambient
+                const noiseMultiplier = 1.2; // Reduced: Voice chỉ cần 20% above ambient
                 const baseThreshold = currentAmbient * noiseMultiplier;
                 const userThreshold = sensitivityRef.current / 2;
                 effectiveThreshold = Math.max(baseThreshold, userThreshold);
@@ -612,6 +612,13 @@ const ControlHub = () => {
             if (noiseGateRef.current) {
                 const gateGain = vol > effectiveThreshold ? 1 : 0;
                 noiseGateRef.current.gain.setValueAtTime(gateGain, audioCtx.currentTime);
+                
+                // Debug noise gate every 60 frames
+                if (!window.gateDebugCount) window.gateDebugCount = 0;
+                if (window.gateDebugCount % 60 === 0) {
+                    console.log(`[Gate Debug] Vol: ${vol} > Threshold: ${effectiveThreshold.toFixed(1)} = ${vol > effectiveThreshold ? 'OPEN' : 'CLOSED'} | Gain: ${gateGain}`);
+                }
+                window.gateDebugCount++;
             }
             
             // LOG DEBUG: Enhanced logging for noise cancellation
