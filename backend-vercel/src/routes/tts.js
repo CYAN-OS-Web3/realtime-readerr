@@ -28,6 +28,7 @@ async function speak(req, res){
       if (!ok) return res.status(429).json({ error: 'rate_limit_exceeded' })
     }
     const languageCode = (req.body.language || 'en-US')
+    const preferredEngine = (req.body.tts_engine || req.body.ttsEngine || '').toString().trim().toLowerCase()
     const plan = oceanConsumerId ? 'ocean' : await supa.getUserPlan(userId)
     const allow = await supa.checkRateLimit(limiterId, Math.max(1, Math.ceil(chars / 10)), plan)
     if (!allow) return res.status(429).json({ error: 'too_many_requests' })
@@ -36,9 +37,7 @@ async function speak(req, res){
     if (deviceId){
       try{ deviceVoiceId = await supa.getDeviceVoice(userId, deviceId) }catch(_){}
     }
-    const defaultVoiceId = (process.env.ELEVENLABS_DEFAULT_VOICE_ID || '').toString().trim()
-    const voiceId = (deviceVoiceId || defaultVoiceId || '').toString().trim()
-    const result = await ttsRouter.speakRouted({ userId, text, languageCode, gender, plan, deviceVoiceId })
+    const result = await ttsRouter.speakRouted({ userId, text, languageCode, gender, plan, deviceVoiceId, preferredEngine })
     provider = result.provider
     chain = result.chain || []
     const audioBase64 = result.audio.toString('base64')
@@ -85,6 +84,7 @@ async function speakStream(req, res){
     const gender = (req.body.gender || 'female').toLowerCase()
     const chars = text.length
     const languageCode = (req.body.language || 'en-US')
+    const preferredEngine = (req.body.tts_engine || req.body.ttsEngine || '').toString().trim().toLowerCase()
 
     if (!oceanConsumerId) {
       const ok = await supa.checkAndIncrementQuota(userId, chars, 'standard')
@@ -100,6 +100,8 @@ async function speakStream(req, res){
     if (deviceId){
       try{ deviceVoiceId = await supa.getDeviceVoice(userId, deviceId) }catch(_){}
     }
+    const defaultVoiceId = (process.env.ELEVENLABS_DEFAULT_VOICE_ID || '').toString().trim()
+    const voiceId = (deviceVoiceId || defaultVoiceId || '').toString().trim()
 
     const canStreamEleven = (plan === 'pro' || plan === 'premium' || plan === 'team' || plan === 'executive_pro_annual')
     if (canStreamEleven && voiceId) {
@@ -126,7 +128,7 @@ async function speakStream(req, res){
       return
     }
 
-    const result = await ttsRouter.speakRouted({ userId, text, languageCode, gender, plan, deviceVoiceId })
+    const result = await ttsRouter.speakRouted({ userId, text, languageCode, gender, plan, deviceVoiceId, preferredEngine })
     provider = result.provider
     chain = result.chain || []
     res.set('Content-Type', result.contentType || 'audio/mpeg')

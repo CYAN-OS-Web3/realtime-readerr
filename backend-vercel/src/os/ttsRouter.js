@@ -31,9 +31,10 @@ async function tryProvider(name, fn, timeoutMs){
   }
 }
 
-async function speakRouted({ userId, text, languageCode, gender, plan, deviceVoiceId }){
+async function speakRouted({ userId, text, languageCode, gender, plan, deviceVoiceId, preferredEngine }){
   const gVoice = gender === 'male' ? 'en-US-Wavenet-D' : 'en-US-Wavenet-F'
   const aVoice = gender === 'male' ? 'en-US-GuyNeural' : 'en-US-JennyNeural'
+  const preferred = (preferredEngine || '').toString().trim().toLowerCase()
   const attempts = []
   if ((plan === 'pro' || plan === 'premium' || plan === 'team' || plan === 'executive_pro_annual') && hasEleven()){
     const defaultVoiceId = (process.env.ELEVENLABS_DEFAULT_VOICE_ID || '').toString().trim()
@@ -48,6 +49,15 @@ async function speakRouted({ userId, text, languageCode, gender, plan, deviceVoi
   }
   if (hasGoogle()) attempts.push(() => tryProvider('google', () => gtts.speak(text, languageCode, gVoice), 0))
   if (hasAzure()) attempts.push(() => tryProvider('azure', () => aztts.speak(text, aVoice), 0))
+
+  if (preferred){
+    attempts.sort((a, b) => {
+      const ar = a.toString().includes(`'${preferred}'`) ? 0 : 1
+      const br = b.toString().includes(`'${preferred}'`) ? 0 : 1
+      return ar - br
+    })
+  }
+
   const chain = []
   for (const run of attempts){
     const r = await run()
