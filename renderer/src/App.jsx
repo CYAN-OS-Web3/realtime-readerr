@@ -502,7 +502,7 @@ const ControlHub = () => {
         sourceRef.current = source;
 
         const gainNode = audioCtx.createGain();
-        gainNode.gain.setValueAtTime(20.0, audioCtx.currentTime); // Tăng gain lên 20x cho voice
+        gainNode.gain.setValueAtTime(50.0, audioCtx.currentTime); // Tăng gain lên 50x cho voice
         gainNodeRef.current = gainNode;
         console.log("Gain node created with gain:", gainNode.gain.value);
 
@@ -632,6 +632,14 @@ const ControlHub = () => {
             if (vol > effectiveThreshold) {
                 lastVoiceAtRef.t = Date.now();
                 hasSentDataRef.current = true;
+                
+                // Debug: Check if we have data
+                if (!window.sendDebugCount) window.sendDebugCount = 0;
+                if (window.sendDebugCount % 30 === 0) {
+                    console.log(`[Send Debug] Gate OPEN! Input length: ${inputData.length}, electronAPI: ${!!window.electronAPI}`);
+                }
+                window.sendDebugCount++;
+                
                 const int16Data = convertFloat32ToInt16(inputData);
                 if (window.electronAPI) {
                     window.electronAPI.sendAudioChunk(new Uint8Array(int16Data));
