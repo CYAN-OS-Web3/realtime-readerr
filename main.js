@@ -302,8 +302,16 @@ async function callElevenLabsTTSService(text, targetLang) {
     const userId = getInstallId();
     const languageCode = normalizeLang(targetLang);
     try {
-        const u = new URL(`${BACKEND_URL}/api/tts/speak-pcm-stream`);
-        const body = JSON.stringify({ user_id: userId, device_id: userId, text, language: languageCode, gender: 'female' });
+        // Use speak-stream for lower latency (MP3 streaming)
+        const u = new URL(`${BACKEND_URL}/api/tts/speak-stream`);
+        const body = JSON.stringify({ 
+            user_id: userId, 
+            device_id: userId, 
+            text, 
+            language: languageCode, 
+            gender: 'female', 
+            tts_engine: 'elevenlabs' 
+        });
         const req = https.request({
             hostname: u.hostname,
             port: u.port ? Number(u.port) : 443,
@@ -321,73 +329,101 @@ async function callElevenLabsTTSService(text, targetLang) {
                 res.on('data', (c) => err.push(c));
                 res.on('end', () => {
                     const txt = Buffer.concat(err).toString('utf8');
-                    sendToRenderer('log-message', `Backend PCM stream lỗi (HTTP ${status}): ${txt}`, 'error');
+                    sendToRenderer('log-message', `Backend ElevenLabs stream lỗi (HTTP ${status}): ${txt}`, 'error');
                 });
                 return;
             }
+            
+            // Handle streaming JSON lines
+            let buffer = '';
             res.on('data', (c) => {
-                const buf = Buffer.isBuffer(c) ? c : Buffer.from(c);
-                pending = pending.length ? Buffer.concat([pending, buf]) : buf;
-                const even = pending.length - (pending.length % 2);
-                if (even <= 0) return;
-                const out = pending.subarray(0, even);
-                pending = pending.subarray(even);
-                sendToRenderer('tts-audio-chunk', new Uint8Array(out));
+                buffer += c.toString();
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+                
+                for (const line of lines) {
+                    if (line.trim()) {
+                        try {
+                            const data = JSON.parse(line);
+                            if (data.audio) {
+                                const audioBuffer = Buffer.from(data.audio, 'base64');
+                                sendToRenderer('tts-audio-chunk', new Uint8Array(audioBuffer));
+                            }
+                        } catch (e) {
+                            // Ignore malformed JSON lines
+                        }
+                    }
+                }
             });
+            
             res.on('end', () => {
                 sendToRenderer('tts-audio-done');
+                sendToRenderer('log-message', `ElevenLabs TTS streaming: Phát thành công (${languageCode}).`, 'success');
             });
         });
-        req.on('error', (e) => sendToRenderer('log-message', `Lỗi gọi Backend stream: ${e.message}`, 'error'));
+        req.on('error', (e) => sendToRenderer('log-message', `Lỗi gọi Backend ElevenLabs stream: ${e.message}`, 'error'));
         req.write(body);
         req.end();
     } catch (e) {
-        sendToRenderer('log-message', `Lỗi gọi Backend TTS: ${e && e.message ? e.message : 'unknown'}`, 'error');
+        sendToRenderer('log-message', `Lỗi gọi Backend ElevenLabs TTS: ${e && e.message ? e.message : 'unknown'}`, 'error');
     }
 }
 
 async function callAzureTTSService(text, targetLang) {
-    if (!azureKey || !azureRegion || azureKey.length < 50) { 
-        sendToRenderer('log-message', 'Lỗi Azure TTS: Azure Key hoặc Region chưa được cấu hình (hoặc key quá ngắn) trong main.js.', 'error');
-        return;
-    }
-    const speechConfig = sdk.SpeechConfig.fromSubscription(azureKey, azureRegion);
-    speechConfig.speechSynthesisOutputFormat = sdk.SpeechSynthesisOutputFormat.MP3;
-
-    const voiceName = getAzureVoiceName(targetLang);
-    speechConfig.speechSynthesisVoiceName = voiceName;
-
-    const synthesizer = new sdk.SpeechSynthesizer(speechConfig);
-
     try {
-        const result = await new Promise((resolve, reject) => {
-            synthesizer.speakTextAsync(text, resolve, reject);
+        const userId = getInstallId();
+        const languageCode = normalizeLang(targetLang);
+        const response = await fetch(`${BACKEND_URL}/api/tts/speak-stream`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                text,
+                language: languageCode,
+                gender: 'female',
+                user_id: userId,
+                device_id: userId,
+                tts_engine: 'azure'
+            })
         });
 
-        if (result.reason === sdk.ResultReason.SynthesizingAudioCompleted) {
-            const audioData = result.audioData;
-            const audioBuffer = Buffer.from(audioData);
-            sendToRenderer('tts-audio-ready', new Uint8Array(audioBuffer));
-            sendToRenderer('log-message', `Azure TTS: Phát thành công bằng giọng ${voiceName}.`, 'success');
-        } else if (result.reason === sdk.ResultReason.Canceled) {
-             const cancellation = sdk.CancellationDetails.fromResult(result);
-             let reason = cancellation.reason;
-             let errorMsg = `Azure TTS CANCELED. Reason: ${reason}. Details: ${cancellation.errorDetails}`;
-             
-             if (reason === sdk.CancellationReason.Error) {
-                 errorMsg += "\n*** HƯỚNG DẪN: Kiểm tra lại Azure Key và Region trong main.js! ***";
-             }
-             sendToRenderer('log-message', errorMsg, 'error');
-             console.error('Azure TTS Cancellation Details:', cancellation);
-
-        } else {
-            sendToRenderer('log-message', `Azure TTS: Lỗi tổng hợp giọng nói. Lý do: ${result.reason}`, 'error');
-            console.error('Azure TTS Error:', result.errorDetails);
+        if (!response.ok) {
+            throw new Error(`Backend Azure TTS stream error: ${response.status}`);
         }
+
+        // Handle streaming response
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            
+            for (const line of lines) {
+                if (line.trim()) {
+                    try {
+                        const data = JSON.parse(line);
+                        if (data.audio) {
+                            const audioBuffer = Buffer.from(data.audio, 'base64');
+                            sendToRenderer('tts-audio-chunk', new Uint8Array(audioBuffer));
+                        }
+                    } catch (e) {
+                        // Ignore malformed JSON lines
+                    }
+                }
+            }
+        }
+        
+        sendToRenderer('tts-audio-done');
+        sendToRenderer('log-message', `Azure TTS streaming: Phát thành công (${languageCode}).`, 'success');
     } catch (e) {
-        sendToRenderer('log-message', `Lỗi Azure TTS (Exception): ${e.message}`, 'error');
-    } finally {
-        synthesizer.close();
+        sendToRenderer('log-message', `Lỗi Azure TTS streaming: ${e.message}`, 'error');
     }
 }
 
@@ -408,7 +444,7 @@ async function callGoogleWaveNetTTSService(text, targetLang) {
         
         console.log(`🔊 Calling Backend TTS API: "${text}" -> ${languageCode}`);
         
-        const response = await fetch(`${BACKEND_URL}/api/tts/speak`, {
+        const response = await fetch(`${BACKEND_URL}/api/tts/speak-stream`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -417,23 +453,46 @@ async function callGoogleWaveNetTTSService(text, targetLang) {
                 text: text,
                 language: languageCode,
                 gender: 'female',
-                user_id: getInstallId()
+                user_id: getInstallId(),
+                device_id: getInstallId(),
+                tts_engine: 'google'
             })
         });
 
         if (!response.ok) {
-            throw new Error(`Backend TTS error: ${response.status}`);
+            throw new Error(`Backend TTS stream error: ${response.status}`);
         }
 
-        const result = await response.json();
+        // Handle streaming response
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
         
-        if (result.audio) {
-            const audioBuffer = Buffer.from(result.audio, 'base64');
-            sendToRenderer('tts-audio-ready', new Uint8Array(audioBuffer));
-            sendToRenderer('log-message', `Backend TTS: Phát thành công (${languageCode}).`, 'success');
-        } else {
-            sendToRenderer('log-message', 'Lỗi Backend TTS: Không nhận được nội dung âm thanh.', 'error');
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            
+            for (const line of lines) {
+                if (line.trim()) {
+                    try {
+                        const data = JSON.parse(line);
+                        if (data.audio) {
+                            const audioBuffer = Buffer.from(data.audio, 'base64');
+                            sendToRenderer('tts-audio-chunk', new Uint8Array(audioBuffer));
+                        }
+                    } catch (e) {
+                        // Ignore malformed JSON lines
+                    }
+                }
+            }
         }
+        
+        sendToRenderer('tts-audio-done');
+        sendToRenderer('log-message', `Backend TTS streaming: Phát thành công (${languageCode}).`, 'success');
 
     } catch (e) {
         sendToRenderer('log-message', `Lỗi kết nối/gọi Backend TTS: ${e.message}`, 'error');
@@ -476,7 +535,7 @@ async function translateAndSpeak(text, targetLang, ttsEngine) {
             await callAzureTTSService(translatedText, targetLang);
         } else if (ttsEngine === 'google') {
             console.log(`🔊 Using Google TTS engine`);
-            callGoogleWaveNetTTSService(translatedText, targetLang);
+            await callGoogleWaveNetTTSService(translatedText, targetLang);
         } else {
             console.log(`🔊 Unknown TTS engine: ${ttsEngine}`);
         }
@@ -496,6 +555,11 @@ function startStream(sourceLangCode, sampleRate = 16000) {
     if (recognizeStream) {
         stopStream();
     }
+
+    // Reset realtime buffer/timing state for a clean new session
+    audioBuffer = [];
+    lastProcessTime = 0;
+    audioChunkLogCounter = 0;
     
     sendToRenderer('log-message', `Chuẩn bị khởi tạo STT Stream. Code: ${sourceLangCode}, Rate: ${sampleRate}Hz`, 'info');
     sendToRenderer('log-message', `Khởi tạo Backend STT Stream cho ngôn ngữ: ${sourceLangCode}`, 'info');
@@ -528,28 +592,73 @@ function startStream(sourceLangCode, sampleRate = 16000) {
 
     isStreaming = true;
     sendToRenderer('log-message', 'STT Stream đã BẮT ĐẦU. Đang chờ âm thanh...', 'success');
+    
+    // Schedule periodic recreation for long sessions
+    scheduleStreamRecreation();
 }
 
 // Backend STT streaming functions
 let backendStreamResponse = null;
 let audioBuffer = [];
 let lastProcessTime = 0;
-const MIN_CHUNK_INTERVAL = 500; // Process every 500ms minimum
-const MIN_CHUNK_SIZE = 12000; // 250ms at 48kHz
+let audioChunkLogCounter = 0;
+let streamRecreationTimer = null;
+// NOTE:
+// Fixed thresholds caused regressions when sample rate changed (48k -> 16k).
+// Use dynamic chunk sizing so backend STT always gets a sufficient window.
+const TARGET_REALTIME_WINDOW_MS = 400; // Reduced from 1800ms for sub-400ms latency
+
+// Recreate stream every 5 minutes to prevent long-running issues
+function scheduleStreamRecreation() {
+    if (streamRecreationTimer) clearTimeout(streamRecreationTimer);
+    streamRecreationTimer = setTimeout(() => {
+        console.log('[STT] Recreating stream for long-running stability...');
+        if (isStreaming && currentSettings.sourceLang) {
+            stopStream();
+            setTimeout(() => {
+                startStream(currentSettings.sourceLang, currentSettings.sampleRate);
+                console.log('[STT] Stream recreated successfully');
+            }, 100);
+        }
+        scheduleStreamRecreation(); // Schedule next recreation
+    }, 5 * 60 * 1000); // 5 minutes
+}
+
+function getRealtimeChunkThresholds(sampleRate) {
+    const safeRate = Number(sampleRate) > 0 ? Number(sampleRate) : 16000;
+    // Target ~200ms of audio for faster first-byte
+    const minChunkSizeBytes = Math.max(6400, Math.round((safeRate * 2) * (TARGET_REALTIME_WINDOW_MS / 1000)));
+    return {
+        minChunkIntervalMs: TARGET_REALTIME_WINDOW_MS,
+        minChunkSizeBytes
+    };
+}
 
 function sendAudioChunkToBackend(chunk, language, sampleRate) {
     // Add to buffer for smart processing
     audioBuffer.push(chunk);
     const now = Date.now();
+
+    if (!lastProcessTime) {
+        lastProcessTime = now;
+    }
     
-    console.log(`🎤 Audio chunk received: ${chunk.length} bytes, buffer: ${audioBuffer.length} chunks`);
+    audioChunkLogCounter++;
+    if (audioChunkLogCounter % 40 === 0) {
+        console.log(`🎤 Audio chunk received: ${chunk.length} bytes, buffer: ${audioBuffer.length} chunks`);
+    }
     
     // Process immediately if buffer is large enough or enough time passed
     const totalSize = audioBuffer.reduce((sum, buf) => sum + buf.length, 0);
     const timeSinceLastProcess = now - lastProcessTime;
+    const approxAudioMs = Math.round((totalSize / (sampleRate * 2)) * 1000);
+    const { minChunkIntervalMs, minChunkSizeBytes } = getRealtimeChunkThresholds(sampleRate);
     
-    if (totalSize >= MIN_CHUNK_SIZE || timeSinceLastProcess >= MIN_CHUNK_INTERVAL) {
-        console.log(`🎤 Triggering real-time processing (${totalSize} bytes, ${timeSinceLastProcess}ms)`);
+    if (totalSize >= minChunkSizeBytes || timeSinceLastProcess >= minChunkIntervalMs) {
+        // Log less frequently to reduce noise
+        if (audioChunkLogCounter % 20 === 0) {
+            console.log(`🎤 Triggering real-time processing (${totalSize} bytes, ~${approxAudioMs}ms audio, ${timeSinceLastProcess}ms since last, minBytes=${minChunkSizeBytes}, minMs=${minChunkIntervalMs})`);
+        }
         const combinedChunk = Buffer.concat(audioBuffer);
         processAudioChunk(combinedChunk, language, sampleRate);
         audioBuffer = [];
@@ -723,6 +832,8 @@ function endBackendStream() {
         backendStreamResponse = null;
     }
     audioBuffer = [];
+    lastProcessTime = 0;
+    audioChunkLogCounter = 0;
 }
 
 function stopStream() {
@@ -731,6 +842,13 @@ function stopStream() {
         recognizeStream = null;
         isStreaming = false;
     }
+    
+    // Clear stream recreation timer
+    if (streamRecreationTimer) {
+        clearTimeout(streamRecreationTimer);
+        streamRecreationTimer = null;
+    }
+    
     endBackendStream();
     sttFinalizing = false;
     lastPartialTranscript = '';
@@ -939,25 +1057,46 @@ app.whenReady().then(() => {
 });
 
 // Periodic backend health check
-setInterval(async () => {
-    try {
-        const startTime = Date.now();
-        const response = await fetch(`${BACKEND_URL}/api/health`);
-        const status = response.ok ? 'OK' : 'ERROR';
-        const latency = Date.now() - startTime;
-        console.log(`[Health Check] Backend status: ${status} (${response.status}), Latency: ${latency}ms`);
-        sendToRenderer('server-status', { 
-            connected: response.ok, 
-            latency: latency 
-        });
-    } catch (error) {
-        console.log('[Health Check] Backend error:', error.message);
-        sendToRenderer('server-status', { 
-            connected: false, 
-            error: error.message 
-        });
-    }
-}, 30000); // Check every 30 seconds
+let lastHealthStatus = null;
+let healthCheckInterval = null;
+
+function startHealthCheck() {
+    if (healthCheckInterval) clearInterval(healthCheckInterval);
+    
+    healthCheckInterval = setInterval(async () => {
+        try {
+            const startTime = Date.now();
+            const response = await fetch(`${BACKEND_URL}/api/health`);
+            const status = response.ok ? 'OK' : 'ERROR';
+            const latency = Date.now() - startTime;
+            
+            // Only log when status changes
+            const currentStatus = `${status} (${response.status})`;
+            if (currentStatus !== lastHealthStatus) {
+                console.log(`[Health Check] Backend status: ${currentStatus}, Latency: ${latency}ms`);
+                lastHealthStatus = currentStatus;
+            }
+            
+            sendToRenderer('server-status', { 
+                connected: response.ok, 
+                latency: latency 
+            });
+        } catch (error) {
+            const currentStatus = `ERROR: ${error.message}`;
+            if (currentStatus !== lastHealthStatus) {
+                console.log('[Health Check] Backend error:', error.message);
+                lastHealthStatus = currentStatus;
+            }
+            sendToRenderer('server-status', { 
+                connected: false, 
+                error: error.message 
+            });
+        }
+    }, 60000); // Check every 60 seconds (reduced noise)
+}
+
+// Start health check after app is ready
+setTimeout(startHealthCheck, 2000);
 
 app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') {

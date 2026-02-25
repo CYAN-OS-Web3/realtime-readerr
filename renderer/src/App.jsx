@@ -36,6 +36,8 @@ import { Wifi, WifiOff, Globe, Mic, Settings, Minimize2, X, Check, ChevronRight,
     return buf.buffer; // Returns ArrayBuffer
   };
 
+  const STT_TARGET_SAMPLE_RATE = 48000;
+
 const ControlHub = () => {
   // UI State
   const [isConnected, setIsConnected] = useState(true);
@@ -46,7 +48,11 @@ const ControlHub = () => {
   const [showOverlay, setShowOverlay] = useState(false);
   const [micVolume, setMicVolume] = useState(0);
   const [sensitivity, setSensitivity] = useState(50);
-  const [ttsEngine, setTtsEngine] = useState('google');
+  const [ttsEngine, setTtsEngine] = useState(() => {
+    // Default to Google WaveNet for lower latency
+    const saved = localStorage.getItem('cyan_tts_engine');
+    return saved || 'google';
+  });
   const [backendUrl, setBackendUrl] = useState('');
   const [installId, setInstallId] = useState('');
   const [voiceOrderId, setVoiceOrderId] = useState('');
@@ -82,10 +88,24 @@ const ControlHub = () => {
   const [inputDeviceId, setInputDeviceId] = useState('');
   const [audioOutputs, setAudioOutputs] = useState([]);
   const [outputDeviceId, setOutputDeviceId] = useState('default');
-  const [noiseReduction, setNoiseReduction] = useState(false); // Default OFF for testing
+  const [noiseReduction, setNoiseReduction] = useState(() => {
+    // Default to ON for noise suppression
+    const saved = localStorage.getItem('cyan_noise_reduction');
+    return saved !== null ? JSON.parse(saved) : true;
+  }); // Default ON
   const [noiseGateMode, setNoiseGateMode] = useState('adaptive'); // adaptive, manual, off
   const [ambientNoiseLevel, setAmbientNoiseLevel] = useState(0);
 
+
+  // Save TTS engine preference to localStorage
+  useEffect(() => {
+    localStorage.setItem('cyan_tts_engine', ttsEngine);
+  }, [ttsEngine]);
+
+  // Save noise reduction preference to localStorage
+  useEffect(() => {
+    localStorage.setItem('cyan_noise_reduction', JSON.stringify(noiseReduction));
+  }, [noiseReduction]);
 
   const [authUserId, setAuthUserId] = useState('');
 
@@ -455,14 +475,13 @@ const ControlHub = () => {
         console.log("Selected input device ID:", inputDeviceId || 'default');
         console.log("Mic permissions:", navigator.permissions ? 'API available' : 'API not available');
 
-        // Force disable audio processing features (echoCancellation, etc.)
-        // This is CRITICAL to prevent the browser/OS from muting output when mic is active
+        // Enable noise suppression by default (can be toggled via UI)
         const stream = await navigator.mediaDevices.getUserMedia({ 
             audio: {
                 deviceId: inputDeviceId ? { exact: inputDeviceId } : undefined,
-                echoCancellation: false,
-                noiseSuppression: false,
-                autoGainControl: false,
+                echoCancellation: noiseReduction,
+                noiseSuppression: noiseReduction,
+                autoGainControl: noiseReduction,
                 channelCount: 1
             } 
         });
@@ -505,7 +524,10 @@ const ControlHub = () => {
         sourceRef.current = source;
 
         const gainNode = audioCtx.createGain();
-        gainNode.gain.setValueAtTime(50.0, audioCtx.currentTime); // Tăng gain lên 50x cho voice
+        const calibratedGain = 8.0;
+        // Use both direct assignment and setValueAtTime to ensure immediate application.
+        gainNode.gain.value = calibratedGain;
+        gainNode.gain.setValueAtTime(calibratedGain, audioCtx.currentTime);
         gainNodeRef.current = gainNode;
         window.gainNode = gainNode; // Make globally accessible
         console.log("Gain node created with gain:", gainNode.gain.value);
@@ -545,13 +567,23 @@ const ControlHub = () => {
         console.log('processorRef.current set:', !!processorRef.current);
         console.log('Direct check processorRef.current:', !!processorRef.current);
 
-        // SIMPLE AUDIO CHAIN - NO NOISE REDUCTION
+        // AUDIO CHAIN with noise gate when enabled
         source.connect(compressor);
         compressor.connect(gainNode);
         
-        console.log('Simple audio chain: source → compressor → gainNode → worklet');
+        // Add noise gate if noise reduction is enabled
+        if (noiseReduction) {
+            const noiseGate = audioCtx.createGain();
+            noiseGateRef.current = noiseGate;
+            gainNode.connect(noiseGate);
+            noiseGate.connect(workletNode);
+            console.log('Audio chain with noise gate: source → compressor → gainNode → noiseGate → worklet');
+        } else {
+            gainNode.connect(workletNode);
+            console.log('Simple audio chain: source → compressor → gainNode → worklet');
+        }
+        
         console.log('Connecting to gainNode with gain:', gainNode.gain.value);
-        gainNode.connect(workletNode);
 
         const lastVoiceAtRef = { t: Date.now() };
         const lastFinalizeTsRef = { t: 0 };
@@ -568,7 +600,9 @@ const ControlHub = () => {
                 sum += inputData[i] * inputData[i];
             }
             const rms = Math.sqrt(sum / inputData.length);
-            const vol = Math.min(100, Math.round(rms * 1000));
+            // dB-based normalization keeps meter stable and avoids always-on 100%.
+            const db = 20 * Math.log10(rms + 1e-8);
+            const vol = Math.min(100, Math.max(0, Math.round(((db + 60) / 60) * 100)));
             setMicVolume(vol);
 
             // Advanced adaptive noise detection
@@ -625,17 +659,38 @@ const ControlHub = () => {
                 
                 // Debug: Check if we have data
                 if (!window.sendDebugCount) window.sendDebugCount = 0;
-                if (window.sendDebugCount % 30 === 0) {
+                if (window.sendDebugCount % 600 === 0) {
                     console.log(`[Send Debug] Gate OPEN! Input length: ${inputData.length}, electronAPI: ${!!window.electronAPI}`);
                 }
                 window.sendDebugCount++;
                 
-                const int16Data = convertFloat32ToInt16(inputData);
+                // Built-in PCM diagnostics (avoid monkey-patching contextBridge API)
+                if (!window.pcmDebugCount) window.pcmDebugCount = 0;
+                if (window.pcmDebugCount % 600 === 0) {
+                    let peak = 0;
+                    let sq = 0;
+                    for (let i = 0; i < inputData.length; i++) {
+                        const v = inputData[i];
+                        const a = Math.abs(v);
+                        if (a > peak) peak = a;
+                        sq += v * v;
+                    }
+                    const rmsLocal = Math.sqrt(sq / Math.max(1, inputData.length));
+                    const dbLocal = 20 * Math.log10(rmsLocal + 1e-9);
+                    console.log(`[PCM] frames=${inputData.length} peak=${peak.toFixed(3)} rms=${rmsLocal.toFixed(4)} db=${dbLocal.toFixed(1)} dBFS`);
+                }
+                window.pcmDebugCount++;
+                
+                const inputSampleRate = audioContextRef.current?.sampleRate || 48000;
+                const sttFloatData = inputSampleRate === STT_TARGET_SAMPLE_RATE
+                    ? inputData
+                    : downsampleBuffer(inputData, inputSampleRate, STT_TARGET_SAMPLE_RATE);
+                const int16Data = convertFloat32ToInt16(sttFloatData);
                 
                 // Debug convert function
                 if (!window.convertDebugCount) window.convertDebugCount = 0;
-                if (window.convertDebugCount % 60 === 0) {
-                    console.log(`[Convert Debug] Input: ${inputData.length} floats, Output: ${int16Data ? int16Data.byteLength || 'undefined' : 'null'}`);
+                if (window.convertDebugCount % 600 === 0) {
+                    console.log(`[Convert Debug] Input: ${inputData.length} @${inputSampleRate}Hz -> ${sttFloatData.length} @${STT_TARGET_SAMPLE_RATE}Hz, Output: ${int16Data ? int16Data.byteLength || 'undefined' : 'null'}`);
                 }
                 window.convertDebugCount++;
                 
@@ -643,7 +698,7 @@ const ControlHub = () => {
                     window.electronAPI.sendAudioChunk(new Uint8Array(int16Data));
                     // Debug: Log audio chunks being sent
                     if (!window.audioChunkCount) window.audioChunkCount = 0;
-                    if (window.audioChunkCount % 30 === 0) {
+                    if (window.audioChunkCount % 600 === 0) {
                         console.log(`[STT Debug] Sending audio chunk: ${int16Data.byteLength || int16Data.length} bytes, Gate: OPEN`);
                     }
                     window.audioChunkCount++;
@@ -797,8 +852,9 @@ const ControlHub = () => {
         // Map targetLang to short code if needed
         const targetShort = targetLang.split('-')[0];
         
-        const currentSampleRate = audioContextRef.current?.sampleRate || 16000;
-        console.log(`[App] Starting translation with Sample Rate: ${currentSampleRate}Hz`);
+        const captureSampleRate = audioContextRef.current?.sampleRate || 48000;
+        const currentSampleRate = STT_TARGET_SAMPLE_RATE;
+        console.log(`[App] Starting translation. Capture: ${captureSampleRate}Hz, STT: ${currentSampleRate}Hz`);
 
         if (window.electronAPI) {
             window.electronAPI.toggleTranslation({
@@ -1021,9 +1077,9 @@ const ControlHub = () => {
                 disabled={isTranslating}
                 className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-cyan-500 cursor-pointer hover:border-gray-600 disabled:opacity-50"
               >
-                 <option value="elevenlabs">ElevenLabs (High Quality)</option>
+                 <option value="google">Google WaveNet (Default)</option>
                  <option value="azure">Azure Neural (Fast)</option>
-                 <option value="google">Google WaveNet (Standard)</option>
+                 <option value="elevenlabs">ElevenLabs (High Quality)</option>
               </select>
            </div>
 
@@ -1153,7 +1209,7 @@ const ControlHub = () => {
              </div>
            )}
 
-           {/* Advanced Noise Control */}
+           {/* Noise Control */}
            <div className="space-y-3">
              <div className="flex items-center justify-between">
                <label className="text-xs text-gray-400">Noise Reduction</label>
@@ -1168,39 +1224,6 @@ const ControlHub = () => {
                  </button>
                </div>
              </div>
-             
-             {noiseReduction && (
-               <>
-                 <div className="flex items-center justify-between">
-                   <label className="text-xs text-gray-400">Noise Gate Mode</label>
-                   <select
-                     value={noiseGateMode}
-                     onChange={(e) => setNoiseGateMode(e.target.value)}
-                     className="text-xs bg-gray-800 text-gray-300 px-2 py-1 rounded border border-gray-700"
-                   >
-                     <option value="adaptive">Adaptive ☕</option>
-                     <option value="manual">Manual</option>
-                     <option value="off">Off</option>
-                   </select>
-                 </div>
-                 
-                 {noiseGateMode === 'adaptive' && (
-                   <div className="bg-gray-800 rounded p-2">
-                     <div className="flex items-center justify-between text-xs">
-                       <span className="text-gray-400">Ambient Noise</span>
-                       <span className="text-cyan-400 font-mono">{ambientNoiseLevel.toFixed(1)}%</span>
-                     </div>
-                     <div className="flex items-center justify-between text-xs mt-1">
-                       <span className="text-gray-400">Auto Threshold</span>
-                       <span className="text-green-400 font-mono">{adaptiveThresholdRef.current?.toFixed(1) || '0.0'}%</span>
-                     </div>
-                     <div className="text-xs text-gray-500 mt-1">
-                       ☕ Perfect for coffee shops
-                     </div>
-                   </div>
-                 )}
-               </>
-             )}
            </div>
 
           {/* Start Button */}

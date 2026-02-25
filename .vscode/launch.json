@@ -1,0 +1,40 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Doctor Check (no Electron)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npm run doctor:check",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Doctor Full (check + Electron dev)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npm run doctor",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Doctor Check Remote (skip local env)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npm run doctor:check:remote",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Doctor Full Remote (skip local env + Electron dev)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npm run doctor:remote",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Doctor Full Remote Auto-Retry (stream debug)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npm run doctor:remote:auto",
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}

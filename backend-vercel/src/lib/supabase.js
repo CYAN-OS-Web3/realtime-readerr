@@ -19,23 +19,38 @@ if (url && key) {
 }
 
 const PLAN_LIMITS = {
-  free: 20000,
-  basic: 200000,
-  standard: 800000,
-  pro: 1500000,
-  team: 3000000,
-  executive_pro_annual: 5000000,
-  premium: 5000000
+  free: 5000,         // 5K chars/month for free
+  basic: 100000,      // 100K chars/month for basic
+  standard: 300000,   // 300K chars/month for standard  
+  pro: 500000,        // 500K chars/month for pro (RapidAPI pricing)
+  team: 1000000,      // 1M chars/month for team
+  executive_pro_annual: 2000000,
+  premium: 2000000
 }
-const ELEVEN_CREDITS = { pro: 300000, team: 1000000, executive_pro_annual: 200000 }
+const ELEVEN_CREDITS = { 
+  basic: 10000,       // 10K chars/month for basic
+  standard: 25000,   // 25K chars/month for standard
+  pro: 50000,        // 50K chars/month for pro (reduced to avoid losses)
+  team: 100000,      // 100K chars/month for team
+  executive_pro_annual: 200000,
+  premium: 200000
+}
 
 const failOpenLimiters = (process.env.FAIL_OPEN_LIMITERS || '').toString().trim().toLowerCase() === 'true'
+
+// Provider-specific character limits per request to prevent abuse
+const PROVIDER_REQUEST_LIMITS = {
+  elevenlabs: 5000,   // Max 5K chars per ElevenLabs request
+  azure: 10000,       // Max 10K chars per Azure request
+  google: 10000       // Max 10K chars per Google WaveNet request
+}
 
 async function checkAndIncrementQuota(userId, chars, tier = 'standard') {
   if (!userId) return false
   let user = null
   try {
-    const r = await supabase.from('users').select('daily_chars,last_reset,plan').eq('google_id', userId).single()
+    // Change from daily to monthly tracking
+    const r = await supabase.from('users').select('monthly_chars,last_reset,plan').eq('google_id', userId).single()
     user = r && r.data ? r.data : null
   } catch (_) {
     user = null
@@ -46,8 +61,8 @@ async function checkAndIncrementQuota(userId, chars, tier = 'standard') {
       const monthStart = `${new Date().toISOString().slice(0, 7)}-01`
       const created = await supabase
         .from('users')
-        .insert({ google_id: userId, plan: 'free', daily_chars: 0, last_reset: monthStart })
-        .select('daily_chars,last_reset,plan')
+        .insert({ google_id: userId, plan: 'free', monthly_chars: 0, last_reset: monthStart })
+        .select('monthly_chars,last_reset,plan')
         .single()
       user = created && created.data ? created.data : null
     } catch (_) {
@@ -59,11 +74,11 @@ async function checkAndIncrementQuota(userId, chars, tier = 'standard') {
 
   const plan = user.plan || 'free'
   const limit = PLAN_LIMITS[plan] || PLAN_LIMITS.free
-  let used = user.daily_chars || 0
+  let used = user.monthly_chars || 0
 
   if (plan === 'free'){
     if (used + chars > limit) return false
-    await supabase.from('users').update({ daily_chars: used + chars }).eq('google_id', userId)
+    await supabase.from('users').update({ monthly_chars: used + chars }).eq('google_id', userId)
     return true
   }
 
@@ -71,7 +86,7 @@ async function checkAndIncrementQuota(userId, chars, tier = 'standard') {
   const last = user.last_reset ? String(user.last_reset).slice(0, 7) : monthKey
   if (last !== monthKey) used = 0
   if (used + chars > limit) return false
-  await supabase.from('users').update({ daily_chars: used + chars, last_reset: `${monthKey}-01` }).eq('google_id', userId)
+  await supabase.from('users').update({ monthly_chars: used + chars, last_reset: `${monthKey}-01` }).eq('google_id', userId)
   return true
 }
 
@@ -133,7 +148,25 @@ async function checkAndIncrementOceanQuota(consumerId, chars){
   if (!consumerId) return true
   const limit = Number(process.env.OCEAN_MONTHLY_CHARS || 0)
   if (!limit || limit <= 0) return true
+  // Anti-abuse: add per-minute rate limit for Ocean consumers
+  const minuteLimit = Number(process.env.OCEAN_MINUTE_CHARS || 1000) // Default 1000 chars/minute
   try{
+    // Check minute limit first
+    const now = Date.now()
+    const minute = Math.floor(now / 60000)
+    const { data: minuteData } = await supabase.from('ocean_rate_limits').select('minute,used').eq('consumer_id', consumerId).single()
+    let minuteUsed = 0
+    if (minuteData && minuteData.minute === minute) minuteUsed = minuteData.used || 0
+    if (minuteUsed + chars > minuteLimit) return false
+    
+    // Update minute limit
+    if (minuteData){
+      await supabase.from('ocean_rate_limits').update({ minute, used: minuteUsed + chars }).eq('consumer_id', consumerId)
+    } else {
+      await supabase.from('ocean_rate_limits').insert({ consumer_id: consumerId, minute, used: minuteUsed + chars })
+    }
+    
+    // Then check monthly limit
     const monthKey = new Date().toISOString().slice(0, 7)
     const { data } = await supabase.from('ocean_quotas').select('month,used').eq('consumer_id', consumerId).single()
     let used = 0
@@ -184,7 +217,12 @@ async function checkRateLimit(userId, tokens, plan){
   try{
     const now = Date.now()
     const minute = Math.floor(now / 60000)
-    const bucket = plan === 'premium' || plan === 'executive_pro_annual' ? 2000 : (plan === 'team' ? 1600 : (plan === 'pro' ? 1200 : 600))
+    // Match RapidAPI pricing: Pro = 500 tokens/minute
+    const bucket = plan === 'premium' || plan === 'executive_pro_annual' ? 1000 : 
+                   (plan === 'team' ? 800 : 
+                   (plan === 'pro' ? 500 :        // Exact match RapidAPI Pro
+                   (plan === 'standard' ? 300 : 
+                   (plan === 'basic' ? 200 : 100)))) // Free: 100, Basic: 200
     const { data } = await supabase.from('rate_limits').select('minute,used').eq('user_id', userId).single()
     let used = 0, currentMinute = minute
     if (data && data.minute === minute){ used = data.used || 0 }
@@ -197,6 +235,7 @@ async function checkRateLimit(userId, tokens, plan){
 }
 
 module.exports.checkRateLimit = checkRateLimit
+module.exports.PROVIDER_REQUEST_LIMITS = PROVIDER_REQUEST_LIMITS
 
 async function logOsEvent(userId, kind, data){
   try{
