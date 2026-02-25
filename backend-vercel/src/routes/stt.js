@@ -4,6 +4,7 @@ const fetch = require('node-fetch');
 async function recognizeWithRestAPI(audio, language, sampleRate) {
   const apiKey = process.env.GOOGLE_SPEECH_API_KEY;
   const projectId = process.env.GOOGLE_PROJECT_ID || 'gen-lang-client-0283634999';
+  const normalizedSampleRate = Number(sampleRate) > 0 ? Number(sampleRate) : 16000;
   
   if (!apiKey || apiKey.trim() === '') {
     throw new Error('GOOGLE_SPEECH_API_KEY environment variable is required');
@@ -14,7 +15,7 @@ async function recognizeWithRestAPI(audio, language, sampleRate) {
   const body = {
     config: {
       encoding: 'LINEAR16',
-      sampleRateHertz: 44100,
+      sampleRateHertz: normalizedSampleRate,
       languageCode: language,
       enableAutomaticPunctuation: true,
       model: 'latest_short'
