@@ -69,6 +69,7 @@ const ControlHub = () => {
   const processorRef = useRef(null);
   const sourceRef = useRef(null);
   const gainNodeRef = useRef(null);
+  const noiseGateRef = useRef(null);
   const audioQueueRef = useRef([]);
   const isPlayingRef = useRef(false);
   const ttsPlaybackCtxRef = useRef(null);
@@ -82,6 +83,8 @@ const ControlHub = () => {
   const [audioOutputs, setAudioOutputs] = useState([]);
   const [outputDeviceId, setOutputDeviceId] = useState('default');
   const [noiseReduction, setNoiseReduction] = useState(true);
+  const [noiseGateMode, setNoiseGateMode] = useState('adaptive'); // adaptive, manual, off
+  const [ambientNoiseLevel, setAmbientNoiseLevel] = useState(0);
 
 
   const [authUserId, setAuthUserId] = useState('');
@@ -112,6 +115,9 @@ const ControlHub = () => {
 
   const isTranslatingRef = useRef(false);
   const sensitivityRef = useRef(50);
+  const ambientNoiseRef = useRef(0);
+  const noiseHistoryRef = useRef([]);
+  const adaptiveThresholdRef = useRef(25);
 
   useEffect(() => { isTranslatingRef.current = isTranslating; }, [isTranslating]);
   useEffect(() => { sensitivityRef.current = sensitivity; }, [sensitivity]);
@@ -513,16 +519,35 @@ const ControlHub = () => {
         processorRef.current = workletNode;
 
         if (noiseReduction) {
+            // Advanced noise reduction chain
             const hp = audioCtx.createBiquadFilter();
             hp.type = 'highpass';
-            hp.frequency.setValueAtTime(100, audioCtx.currentTime);
+            hp.frequency.setValueAtTime(80, audioCtx.currentTime); // Lower cutoff for better voice
+            
             const lp = audioCtx.createBiquadFilter();
             lp.type = 'lowpass';
             lp.frequency.setValueAtTime(8000, audioCtx.currentTime);
+            
+            // Add noise gate for coffee shop environments
+            const noiseGate = audioCtx.createGain();
+            noiseGate.gain.setValueAtTime(0, audioCtx.currentTime);
+            
+            // Add expander for better dynamics
+            const expander = audioCtx.createDynamicsCompressor();
+            expander.threshold.setValueAtTime(-30, audioCtx.currentTime);
+            expander.ratio.setValueAtTime(0.5, audioCtx.currentTime);
+            expander.attack.setValueAtTime(0.001, audioCtx.currentTime);
+            expander.release.setValueAtTime(0.1, audioCtx.currentTime);
+            
             source.connect(compressor);
             compressor.connect(hp);
             hp.connect(lp);
-            lp.connect(gainNode);
+            lp.connect(expander);
+            expander.connect(noiseGate);
+            noiseGate.connect(gainNode);
+            
+            // Store noise gate reference for adaptive control
+            noiseGateRef.current = noiseGate;
         } else {
             source.connect(compressor);
             compressor.connect(gainNode);
@@ -544,13 +569,44 @@ const ControlHub = () => {
             const vol = Math.min(100, Math.round(rms * 1000));
             setMicVolume(vol);
 
-            // LOG DEBUG: In volume mỗi 50 frame (~1s) để user chỉnh Sensitivity
+            // Advanced adaptive noise detection
+            noiseHistoryRef.current.push(vol);
+            if (noiseHistoryRef.current.length > 60) { // Keep 1 second of history
+                noiseHistoryRef.current.shift();
+            }
+            
+            // Calculate ambient noise level (minimum of last 60 frames)
+            const recentNoise = noiseHistoryRef.current.slice(-60);
+            const currentAmbient = Math.min(...recentNoise);
+            ambientNoiseRef.current = currentAmbient;
+            setAmbientNoiseLevel(currentAmbient);
+            
+            // Adaptive threshold calculation
+            let effectiveThreshold;
+            if (noiseGateMode === 'adaptive') {
+                // Dynamic threshold based on ambient noise
+                const noiseMultiplier = 1.5; // Voice should be 50% above ambient
+                const baseThreshold = currentAmbient * noiseMultiplier;
+                const userThreshold = sensitivityRef.current / 2;
+                effectiveThreshold = Math.max(baseThreshold, userThreshold);
+                adaptiveThresholdRef.current = effectiveThreshold;
+            } else {
+                effectiveThreshold = sensitivityRef.current / 2;
+            }
+            
+            // Noise gate control
+            if (noiseGateRef.current) {
+                const gateGain = vol > effectiveThreshold ? 1 : 0;
+                noiseGateRef.current.gain.setValueAtTime(gateGain, audioCtx.currentTime);
+            }
+            
+            // LOG DEBUG: Enhanced logging for noise cancellation
             if (!window.lastLogTime || Date.now() - window.lastLogTime > 1000) {
                  window.lastLogTime = Date.now();
-                 console.log(`[Mic] Vol: ${vol} | Threshold: ${sensitivityRef.current / 2} | Gate Open: ${vol > (sensitivityRef.current / 2)}`);
+                 console.log(`[Mic] Vol: ${vol} | Ambient: ${currentAmbient.toFixed(1)} | Threshold: ${effectiveThreshold.toFixed(1)} | Gate: ${vol > effectiveThreshold ? 'OPEN' : 'CLOSED'} | Mode: ${noiseGateMode}`);
             }
 
-            if (vol > (sensitivityRef.current / 2)) {
+            if (vol > effectiveThreshold) {
                 lastVoiceAtRef.t = Date.now();
                 hasSentDataRef.current = true;
                 const int16Data = convertFloat32ToInt16(inputData);
@@ -1062,17 +1118,53 @@ const ControlHub = () => {
              </div>
            )}
 
-           <div className="flex items-center justify-between">
-             <label className="text-xs text-gray-400">Noise Reduction</label>
-             <div className="flex items-center gap-2">
-               <span className="text-xs text-gray-400">{noiseReduction ? 'On' : 'Off'}</span>
-               <button
-                 onClick={() => setNoiseReduction(v => !v)}
-                 className={`w-10 h-5 rounded-full ${noiseReduction ? 'bg-cyan-600' : 'bg-gray-700'} relative`}
-               >
-                 <span className={`absolute top-0.5 ${noiseReduction ? 'right-0.5' : 'left-0.5'} w-4 h-4 bg-white rounded-full transition-all`} />
-               </button>
+           {/* Advanced Noise Control */}
+           <div className="space-y-3">
+             <div className="flex items-center justify-between">
+               <label className="text-xs text-gray-400">Noise Reduction</label>
+               <div className="flex items-center gap-2">
+                 <span className="text-xs text-gray-400">{noiseReduction ? 'On' : 'Off'}</span>
+                 <button
+                   onClick={() => setNoiseReduction(v => !v)}
+                   className={`w-10 h-5 rounded-full ${noiseReduction ? 'bg-cyan-600' : 'bg-gray-700'} relative`}
+                 >
+                   <span className={`absolute top-0.5 ${noiseReduction ? 'right-0.5' : 'left-0.5'} w-4 h-4 bg-white rounded-full transition-all`} />
+                 </button>
+               </div>
              </div>
+             
+             {noiseReduction && (
+               <>
+                 <div className="flex items-center justify-between">
+                   <label className="text-xs text-gray-400">Noise Gate Mode</label>
+                   <select
+                     value={noiseGateMode}
+                     onChange={(e) => setNoiseGateMode(e.target.value)}
+                     className="text-xs bg-gray-800 text-gray-300 px-2 py-1 rounded border border-gray-700"
+                   >
+                     <option value="adaptive">Adaptive ☕</option>
+                     <option value="manual">Manual</option>
+                     <option value="off">Off</option>
+                   </select>
+                 </div>
+                 
+                 {noiseGateMode === 'adaptive' && (
+                   <div className="bg-gray-800 rounded p-2">
+                     <div className="flex items-center justify-between text-xs">
+                       <span className="text-gray-400">Ambient Noise</span>
+                       <span className="text-cyan-400 font-mono">{ambientNoiseLevel.toFixed(1)}%</span>
+                     </div>
+                     <div className="flex items-center justify-between text-xs mt-1">
+                       <span className="text-gray-400">Auto Threshold</span>
+                       <span className="text-green-400 font-mono">{adaptiveThresholdRef.current?.toFixed(1) || '0.0'}%</span>
+                     </div>
+                     <div className="text-xs text-gray-500 mt-1">
+                       ☕ Perfect for coffee shops
+                     </div>
+                   </div>
+                 )}
+               </>
+             )}
            </div>
 
           {/* Start Button */}
