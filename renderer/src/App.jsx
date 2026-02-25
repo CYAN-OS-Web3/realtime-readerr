@@ -448,7 +448,10 @@ const ControlHub = () => {
 
         // Debug: List devices
         const devices = await navigator.mediaDevices.enumerateDevices();
-        console.log("Available Audio Devices:", devices.filter(d => d.kind === 'audioinput'));
+        const audioInputs = devices.filter(d => d.kind === 'audioinput');
+        console.log("Available Audio Devices:", audioInputs);
+        console.log("Selected input device ID:", inputDeviceId || 'default');
+        console.log("Mic permissions:", navigator.permissions ? 'API available' : 'API not available');
 
         // Force disable audio processing features (echoCancellation, etc.)
         // This is CRITICAL to prevent the browser/OS from muting output when mic is active
@@ -462,6 +465,13 @@ const ControlHub = () => {
             } 
         });
         mediaStreamRef.current = stream;
+        
+        // Check if stream is active
+        console.log("Stream active:", stream.active);
+        console.log("Stream tracks:", stream.getAudioTracks().length);
+        stream.getAudioTracks().forEach(track => {
+            console.log("Track:", track.label, "Enabled:", track.enabled, "Muted:", track.muted);
+        });
 
         const AudioContext = window.AudioContext || window.webkitAudioContext;
         // Share AudioContext if possible to prevent exclusive mode issues
@@ -535,7 +545,7 @@ const ControlHub = () => {
             // Add expander for better dynamics
             const expander = audioCtx.createDynamicsCompressor();
             expander.threshold.setValueAtTime(-30, audioCtx.currentTime);
-            expander.ratio.setValueAtTime(0.5, audioCtx.currentTime);
+            expander.ratio.setValueAtTime(12, audioCtx.currentTime); // Fixed: ratio must be 1-20
             expander.attack.setValueAtTime(0.001, audioCtx.currentTime);
             expander.release.setValueAtTime(0.1, audioCtx.currentTime);
             
