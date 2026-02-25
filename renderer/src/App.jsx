@@ -542,6 +542,7 @@ const ControlHub = () => {
         window.workletNode = workletNode;
         console.log('WorkletNode created:', !!workletNode);
         console.log('processorRef.current set:', !!processorRef.current);
+        console.log('Direct check processorRef.current:', !!processorRef.current);
 
         // SIMPLE AUDIO CHAIN - NO NOISE REDUCTION
         source.connect(compressor);
@@ -606,13 +607,17 @@ const ControlHub = () => {
                 window.gateDebugCount++;
             }
             
-            // LOG DEBUG: Enhanced logging for noise cancellation
-            if (!window.lastLogTime || Date.now() - window.lastLogTime > 1000) {
-                 window.lastLogTime = Date.now();
-                 console.log(`[Mic] Vol: ${vol} | Ambient: ${currentAmbient.toFixed(1)} | Threshold: ${effectiveThreshold.toFixed(1)} | Gate: ${vol > effectiveThreshold ? 'OPEN' : 'CLOSED'} | Mode: ${noiseGateMode}`);
+            // SIMPLIFIED: Skip noise gate when noise reduction is OFF
+            if (noiseReduction) {
+                // LOG DEBUG: Enhanced logging for noise cancellation
+                if (!window.lastLogTime || Date.now() - window.lastLogTime > 1000) {
+                     window.lastLogTime = Date.now();
+                     console.log(`[Mic] Vol: ${vol} | Ambient: ${currentAmbient.toFixed(1)} | Threshold: ${effectiveThreshold.toFixed(1)} | Gate: ${vol > effectiveThreshold ? 'OPEN' : 'CLOSED'} | Mode: ${noiseGateMode}`);
+                }
             }
 
-            if (vol > effectiveThreshold) {
+            // ALWAYS send audio when noise reduction is OFF, or when above threshold
+            if (!noiseReduction || vol > effectiveThreshold) {
                 lastVoiceAtRef.t = Date.now();
                 hasSentDataRef.current = true;
                 
