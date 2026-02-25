@@ -299,7 +299,7 @@ function httpsJsonPost(urlStr, payload) {
 }
 
 async function callElevenLabsTTSService(text, targetLang) {
-    const userId = CYAN_USER_ID || `install-${app.getPath('userData').split(path.sep).pop()}`;
+    const userId = getInstallId();
     const languageCode = normalizeLang(targetLang);
     try {
         const u = new URL(`${BACKEND_URL}/api/tts/speak-pcm-stream`);
@@ -417,7 +417,7 @@ async function callGoogleWaveNetTTSService(text, targetLang) {
                 text: text,
                 language: languageCode,
                 gender: 'female',
-                user_id: 'electron-user-123'
+                user_id: getInstallId()
             })
         });
 
@@ -937,6 +937,27 @@ app.whenReady().then(() => {
         }
     });
 });
+
+// Periodic backend health check
+setInterval(async () => {
+    try {
+        const startTime = Date.now();
+        const response = await fetch(`${BACKEND_URL}/api/health`);
+        const status = response.ok ? 'OK' : 'ERROR';
+        const latency = Date.now() - startTime;
+        console.log(`[Health Check] Backend status: ${status} (${response.status}), Latency: ${latency}ms`);
+        sendToRenderer('server-status', { 
+            connected: response.ok, 
+            latency: latency 
+        });
+    } catch (error) {
+        console.log('[Health Check] Backend error:', error.message);
+        sendToRenderer('server-status', { 
+            connected: false, 
+            error: error.message 
+        });
+    }
+}, 30000); // Check every 30 seconds
 
 app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') {
