@@ -509,6 +509,7 @@ const ControlHub = () => {
         gainNodeRef.current = gainNode;
         window.gainNode = gainNode; // Make globally accessible
         console.log("Gain node created with gain:", gainNode.gain.value);
+        console.log("Gain node ID:", gainNode.toString());
 
         // Optional dynamics compressor to auto-level quiet Bluetooth mics
         const compressor = audioCtx.createDynamicsCompressor();
@@ -549,6 +550,7 @@ const ControlHub = () => {
         compressor.connect(gainNode);
         
         console.log('Simple audio chain: source → compressor → gainNode → worklet');
+        console.log('Connecting to gainNode with gain:', gainNode.gain.value);
         gainNode.connect(workletNode);
 
         const lastVoiceAtRef = { t: Date.now() };
