@@ -500,8 +500,9 @@ const ControlHub = () => {
         sourceRef.current = source;
 
         const gainNode = audioCtx.createGain();
-        gainNode.gain.setValueAtTime(5.0, audioCtx.currentTime); 
+        gainNode.gain.setValueAtTime(10.0, audioCtx.currentTime); // Tăng gain lên 10x
         gainNodeRef.current = gainNode;
+        console.log("Gain node created with gain:", gainNode.gain.value);
 
         // Optional dynamics compressor to auto-level quiet Bluetooth mics
         const compressor = audioCtx.createDynamicsCompressor();
@@ -528,7 +529,7 @@ const ControlHub = () => {
         const workletNode = new AudioWorkletNode(audioCtx, 'mic-processor');
         processorRef.current = workletNode;
 
-        if (noiseReduction) {
+        if (false && noiseReduction) { // Tạm disable để test
             // Advanced noise reduction chain
             const hp = audioCtx.createBiquadFilter();
             hp.type = 'highpass';
@@ -571,6 +572,18 @@ const ControlHub = () => {
         workletNode.port.onmessage = (e) => {
             if (!isTranslatingRef.current) return;
             const inputData = e.data;
+            
+            // Debug: Check if we're getting data
+            if (inputData && inputData.length > 0) {
+                // Check for non-zero values
+                const hasSound = inputData.some(v => v !== 0);
+                if (!window.audioDebugCount) window.audioDebugCount = 0;
+                if (window.audioDebugCount % 100 === 0) {
+                    console.log(`[Audio Debug] Data length: ${inputData.length}, Has sound: ${hasSound}, Sample values: [${inputData.slice(0, 5).map(v => v.toFixed(4))}...]`);
+                }
+                window.audioDebugCount++;
+            }
+            
             let sum = 0;
             for (let i = 0; i < inputData.length; i++) {
                 sum += inputData[i] * inputData[i];
