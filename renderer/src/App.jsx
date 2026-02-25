@@ -485,6 +485,9 @@ const ControlHub = () => {
         await audioCtx.resume();
         audioContextRef.current = audioCtx;
         
+        // Make globally accessible for debugging
+        window.audioContext = audioCtx;
+        
         // Try to set Sink ID for the entire context if supported (Chrome/Edge)
         // This ensures the shared context outputs to the correct device (Hands-Free)
         if (typeof audioCtx.setSinkId === 'function') {
@@ -504,6 +507,7 @@ const ControlHub = () => {
         const gainNode = audioCtx.createGain();
         gainNode.gain.setValueAtTime(50.0, audioCtx.currentTime); // Tăng gain lên 50x cho voice
         gainNodeRef.current = gainNode;
+        window.gainNode = gainNode; // Make globally accessible
         console.log("Gain node created with gain:", gainNode.gain.value);
 
         // Optional dynamics compressor to auto-level quiet Bluetooth mics
@@ -530,6 +534,7 @@ const ControlHub = () => {
 
         const workletNode = new AudioWorkletNode(audioCtx, 'mic-processor');
         processorRef.current = workletNode;
+        window.processorRef = processorRef;
 
         if (noiseReduction) { // Enable lại noise reduction
             // Advanced noise reduction chain
