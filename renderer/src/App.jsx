@@ -238,6 +238,8 @@ const ControlHub = () => {
     // STT Transcript (Partial/Final)
     const cleanupSTT = window.electronAPI.onSTTTranscript((data) => {
         // data: { transcript, isFinal }
+        console.log(`[STT Event] Received transcript: "${data.transcript}", Final: ${data.isFinal}`);
+        
         // We can show partial results if we want, or just wait for final.
         // For this UI, let's update the "current" source text if it's partial?
         // The current UI design shows a list of completed sentences.
@@ -633,6 +635,12 @@ const ControlHub = () => {
                 const int16Data = convertFloat32ToInt16(inputData);
                 if (window.electronAPI) {
                     window.electronAPI.sendAudioChunk(new Uint8Array(int16Data));
+                    // Debug: Log audio chunks being sent
+                    if (!window.audioChunkCount) window.audioChunkCount = 0;
+                    if (window.audioChunkCount % 30 === 0) {
+                        console.log(`[STT Debug] Sending audio chunk: ${int16Data.length} bytes, Gate: OPEN`);
+                    }
+                    window.audioChunkCount++;
                 }
             } else {
                 const now = Date.now();
