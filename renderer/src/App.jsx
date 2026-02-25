@@ -529,7 +529,7 @@ const ControlHub = () => {
         const workletNode = new AudioWorkletNode(audioCtx, 'mic-processor');
         processorRef.current = workletNode;
 
-        if (false && noiseReduction) { // Tạm disable để test
+        if (noiseReduction) { // Enable lại noise reduction
             // Advanced noise reduction chain
             const hp = audioCtx.createBiquadFilter();
             hp.type = 'highpass';
@@ -573,16 +573,7 @@ const ControlHub = () => {
             if (!isTranslatingRef.current) return;
             const inputData = e.data;
             
-            // Debug: Check if we're getting data
-            if (inputData && inputData.length > 0) {
-                // Check for non-zero values
-                const hasSound = inputData.some(v => v !== 0);
-                if (!window.audioDebugCount) window.audioDebugCount = 0;
-                if (window.audioDebugCount % 100 === 0) {
-                    console.log(`[Audio Debug] Data length: ${inputData.length}, Has sound: ${hasSound}, Sample values: [${inputData.slice(0, 5).map(v => v.toFixed(4))}...]`);
-                }
-                window.audioDebugCount++;
-            }
+            // Audio data is flowing correctly - no need for debug logs
             
             let sum = 0;
             for (let i = 0; i < inputData.length; i++) {
