@@ -631,12 +631,20 @@ const ControlHub = () => {
                 window.sendDebugCount++;
                 
                 const int16Data = convertFloat32ToInt16(inputData);
-                if (window.electronAPI) {
+                
+                // Debug convert function
+                if (!window.convertDebugCount) window.convertDebugCount = 0;
+                if (window.convertDebugCount % 60 === 0) {
+                    console.log(`[Convert Debug] Input: ${inputData.length} floats, Output: ${int16Data ? int16Data.byteLength || 'undefined' : 'null'}`);
+                }
+                window.convertDebugCount++;
+                
+                if (window.electronAPI && int16Data) {
                     window.electronAPI.sendAudioChunk(new Uint8Array(int16Data));
                     // Debug: Log audio chunks being sent
                     if (!window.audioChunkCount) window.audioChunkCount = 0;
                     if (window.audioChunkCount % 30 === 0) {
-                        console.log(`[STT Debug] Sending audio chunk: ${int16Data.length} bytes, Gate: OPEN`);
+                        console.log(`[STT Debug] Sending audio chunk: ${int16Data.byteLength || int16Data.length} bytes, Gate: OPEN`);
                     }
                     window.audioChunkCount++;
                 }
