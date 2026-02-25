@@ -1,10 +1,11 @@
 const fetch = require('node-fetch');
 
 // Use Google Speech REST API directly instead of SDK
-async function recognizeWithRestAPI(audio, language, sampleRate) {
+async function recognizeWithRestAPI(audio, language, sampleRate, options = {}) {
   const apiKey = process.env.GOOGLE_SPEECH_API_KEY;
   const projectId = process.env.GOOGLE_PROJECT_ID || 'gen-lang-client-0283634999';
   const normalizedSampleRate = Number(sampleRate) > 0 ? Number(sampleRate) : 16000;
+  const { model } = options;
   
   if (!apiKey || apiKey.trim() === '') {
     throw new Error('GOOGLE_SPEECH_API_KEY environment variable is required');
@@ -12,14 +13,19 @@ async function recognizeWithRestAPI(audio, language, sampleRate) {
   
   const url = `https://speech.googleapis.com/v1/speech:recognize?key=${apiKey}`;
   
+  const config = {
+    encoding: 'LINEAR16',
+    sampleRateHertz: normalizedSampleRate,
+    languageCode: language,
+    enableAutomaticPunctuation: true,
+    audioChannelCount: 1
+  };
+  if (model) {
+    config.model = model;
+  }
+
   const body = {
-    config: {
-      encoding: 'LINEAR16',
-      sampleRateHertz: normalizedSampleRate,
-      languageCode: language,
-      enableAutomaticPunctuation: true,
-      model: 'latest_short'
-    },
+    config,
     audio: {
       content: audio
     }
@@ -56,12 +62,20 @@ async function recognizeSpeech(req, res) {
     console.log('🎤 Language:', language);
     console.log('🎤 Audio length:', audio.length);
 
-    // Use REST API directly
-    const result = await recognizeWithRestAPI(audio, language, sampleRate);
-    
-    const transcript = result.results
+    // Pass 1: preferred for short real-time utterances
+    let result = await recognizeWithRestAPI(audio, language, sampleRate, { model: 'latest_short' });
+
+    let transcript = result.results
       ?.map(result => result.alternatives[0]?.transcript)
       ?.join('\n') || '';
+
+    // Pass 2 fallback: auto model selection can work better for some languages/environments
+    if (!transcript.trim()) {
+      result = await recognizeWithRestAPI(audio, language, sampleRate);
+      transcript = result.results
+        ?.map(result => result.alternatives[0]?.transcript)
+        ?.join('\n') || '';
+    }
 
     const totalMs = Date.now() - startMs;
     
