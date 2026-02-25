@@ -525,16 +525,22 @@ const ControlHub = () => {
         
         if (!workletLoadedRef.current) {
             try {
+                console.log('Loading worklet module...');
                 const workletCode = `class MicProcessor extends AudioWorkletProcessor { process(inputs) { const input = inputs[0]; if (input && input[0]) { this.port.postMessage(input[0]); } return true; } } try { registerProcessor('mic-processor', MicProcessor); } catch(e) {}`;
                 const workletUrl = URL.createObjectURL(new Blob([workletCode], { type: 'application/javascript' }));
                 await audioCtx.audioWorklet.addModule(workletUrl);
                 workletLoadedRef.current = true;
-            } catch (e) {}
+                console.log('Worklet module loaded successfully');
+            } catch (e) {
+                console.error('Failed to load worklet:', e);
+            }
         }
 
         const workletNode = new AudioWorkletNode(audioCtx, 'mic-processor');
         processorRef.current = workletNode;
         window.processorRef = processorRef;
+        window.workletNode = workletNode;
+        console.log('WorkletNode created:', !!workletNode);
 
         if (noiseReduction) { // Enable lại noise reduction
             // Advanced noise reduction chain
