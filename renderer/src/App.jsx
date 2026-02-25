@@ -541,6 +541,7 @@ const ControlHub = () => {
         window.processorRef = processorRef;
         window.workletNode = workletNode;
         console.log('WorkletNode created:', !!workletNode);
+        console.log('processorRef.current set:', !!processorRef.current);
 
         if (noiseReduction) { // Enable lại noise reduction
             // Advanced noise reduction chain
@@ -1173,6 +1174,7 @@ const ControlHub = () => {
                <div className="flex items-center gap-2">
                  <span className="text-xs text-gray-400">{noiseReduction ? 'On' : 'Off'}</span>
                  <button
+                   data-testid="noise-reduction-toggle"
                    onClick={() => setNoiseReduction(v => !v)}
                    className={`w-10 h-5 rounded-full ${noiseReduction ? 'bg-cyan-600' : 'bg-gray-700'} relative`}
                  >
