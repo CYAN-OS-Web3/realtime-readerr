@@ -4,7 +4,8 @@ const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('path');
 const url = require('url');
 const fs = require('fs');
-const isDev = require('electron-is-dev');
+// Manual dev detection to avoid ESM require issues
+const isDev = process.env.NODE_ENV === 'development' || process.argv.includes('--dev') || !app.isPackaged;
 
 const defaultUserData = app.getPath('userData');
 const customUserData = path.join(defaultUserData, 'CyanDev');
@@ -60,14 +61,10 @@ function handleDeepLink(urlStr) {
   }
 }
 
-// Check for development mode
-const isDev = process.env.NODE_ENV === 'development' || process.argv.includes('--dev');
-
 // Ensure autoplay works without user gesture during streaming
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
 // const { SpeechClient } = require('@google-cloud/speech'); // No longer needed - using backend API
-const { Translate } = require('@google-cloud/translate').v2;
 const { TextToSpeechClient } = require('@google-cloud/text-to-speech');
 const https = require('https'); 
 const sdk = require('microsoft-cognitiveservices-speech-sdk'); 
@@ -102,7 +99,7 @@ const AZURE_PREFERRED_GENDER = 'male';
 // 3. KHỞI TẠO CLIENT VÀ BIẾN TOÀN CỤC
 // =========================================================
 // const speechClient = projectId ? new SpeechClient({ projectId: projectId }) : new SpeechClient(); // No longer needed
-const translateClient = projectId ? new Translate({ projectId: projectId }) : new Translate();
+const GOOGLE_TRANSLATE_API_KEY = (process.env.GOOGLE_TRANSLATE_API_KEY || process.env.TRANSLATE_API_KEY || '').trim();
 const ttsClient = new TextToSpeechClient(); 
 
 let recognizeStream = null;
@@ -500,19 +497,31 @@ async function callGoogleWaveNetTTSService(text, targetLang) {
         console.error('Backend TTS Error:', e);
     }
 }
-
-
-// =========================================================
 // 6. XỬ LÝ DỊCH THUẬT VÀ TTS (GIỮ NGUYÊN)
 // =========================================================
 async function translateAndSpeak(text, targetLang, ttsEngine) {
     try {
         console.log(`🔄 Starting translation: "${text}" -> ${targetLang}`);
         
-        // Parallel translation and TTS preparation
-        const translationPromise = translateClient.translate(text, targetLang);
-        const [translation] = await translationPromise;
-        const translatedText = translation;
+        // Translate via REST API (API key)
+        let translatedText = text;
+        if (GOOGLE_TRANSLATE_API_KEY) {
+            try {
+                const resp = await fetch(`https://translation.googleapis.com/language/translate/v2?key=${GOOGLE_TRANSLATE_API_KEY}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ q: text, target: targetLang.split('-')[0] || targetLang })
+                });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    translatedText = data?.data?.translations?.[0]?.translatedText || text;
+                } else {
+                    console.error('Translate REST failed:', resp.status, await resp.text());
+                }
+            } catch (e) {
+                console.error('Translate REST error:', e);
+            }
+        }
 
         console.log(`✅ Translation complete: "${translatedText}"`);
         sendToRenderer('translation:update', { 
@@ -607,7 +616,8 @@ let streamRecreationTimer = null;
 // NOTE:
 // Fixed thresholds caused regressions when sample rate changed (48k -> 16k).
 // Use dynamic chunk sizing so backend STT always gets a sufficient window.
-const TARGET_REALTIME_WINDOW_MS = 400; // Reduced from 1800ms for sub-400ms latency
+// Increase window to give STT enough context (reduce empty transcripts)
+const TARGET_REALTIME_WINDOW_MS = 2000;
 
 // Recreate stream every 5 minutes to prevent long-running issues
 function scheduleStreamRecreation() {
@@ -627,11 +637,13 @@ function scheduleStreamRecreation() {
 
 function getRealtimeChunkThresholds(sampleRate) {
     const safeRate = Number(sampleRate) > 0 ? Number(sampleRate) : 16000;
-    // Target ~200ms of audio for faster first-byte
-    const minChunkSizeBytes = Math.max(6400, Math.round((safeRate * 2) * (TARGET_REALTIME_WINDOW_MS / 1000)));
+    // Target ~1.6s of audio to improve STT accuracy; allow fallback at max interval
+    const minChunkSizeBytes = Math.round((safeRate * 2) * 1.6);
+    const maxIntervalMs = 4500;
     return {
         minChunkIntervalMs: TARGET_REALTIME_WINDOW_MS,
-        minChunkSizeBytes
+        minChunkSizeBytes,
+        maxIntervalMs
     };
 }
 
@@ -653,9 +665,14 @@ function sendAudioChunkToBackend(chunk, language, sampleRate) {
     const totalSize = audioBuffer.reduce((sum, buf) => sum + buf.length, 0);
     const timeSinceLastProcess = now - lastProcessTime;
     const approxAudioMs = Math.round((totalSize / (sampleRate * 2)) * 1000);
-    const { minChunkIntervalMs, minChunkSizeBytes } = getRealtimeChunkThresholds(sampleRate);
+    const { minChunkIntervalMs, minChunkSizeBytes, maxIntervalMs } = getRealtimeChunkThresholds(sampleRate);
     
-    if (totalSize >= minChunkSizeBytes || timeSinceLastProcess >= minChunkIntervalMs) {
+    // Require at least minChunkSizeBytes unless we've waited too long (maxIntervalMs)
+    if (totalSize < minChunkSizeBytes && timeSinceLastProcess < maxIntervalMs) {
+        return;
+    }
+    
+    if (totalSize >= minChunkSizeBytes || timeSinceLastProcess >= maxIntervalMs) {
         // Log less frequently to reduce noise
         if (audioChunkLogCounter % 20 === 0) {
             console.log(`🎤 Triggering real-time processing (${totalSize} bytes, ~${approxAudioMs}ms audio, ${timeSinceLastProcess}ms since last, minBytes=${minChunkSizeBytes}, minMs=${minChunkIntervalMs})`);
