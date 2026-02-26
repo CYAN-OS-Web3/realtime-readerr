@@ -2,6 +2,20 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "Electron Forge Dev",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npm run dev",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Electron Forge Start",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npm run start",
+      "cwd": "${workspaceFolder}"
+    },
+    {
       "name": "Doctor Check (no Electron)",
       "type": "node-terminal",
       "request": "launch",
@@ -9,45 +23,38 @@
       "cwd": "${workspaceFolder}"
     },
     {
-      "name": "Doctor Full (check + Electron dev)",
-      "type": "node-terminal",
-      "request": "launch",
-      "command": "npm run doctor",
-      "cwd": "${workspaceFolder}"
-    },
-    {
-      "name": "Doctor Check Remote (skip local env)",
-      "type": "node-terminal",
-      "request": "launch",
-      "command": "npm run doctor:check:remote",
-      "cwd": "${workspaceFolder}"
-    },
-    {
-      "name": "Doctor Full Remote (skip local env + Electron dev)",
-      "type": "node-terminal",
-      "request": "launch",
-      "command": "npm run doctor:remote",
-      "cwd": "${workspaceFolder}"
-    },
-    {
-      "name": "Doctor Full Remote Auto-Retry (stream debug)",
+      "name": "Doctor Full Remote Auto-Retry",
       "type": "node-terminal",
       "request": "launch",
       "command": "npm run doctor:remote:auto",
       "cwd": "${workspaceFolder}"
     },
     {
-      "name": "Build Electron App",
+      "name": "Doctor Full Remote Auto-Retry (Quick)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npm run doctor:remote:auto:quick",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Build Renderer Only",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npm run build:renderer",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Build Electron App (Forge)",
       "type": "node-terminal",
       "request": "launch",
       "command": "npm run package",
       "cwd": "${workspaceFolder}"
     },
     {
-      "name": "Quick Test Build (skip checks)",
+      "name": "Build Windows Installer",
       "type": "node-terminal",
       "request": "launch",
-      "command": "npm run doctor:remote:auto:quick && npm run package",
+      "command": "npm run package:win",
       "cwd": "${workspaceFolder}"
     }
   ]

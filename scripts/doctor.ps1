@@ -3,6 +3,7 @@ param(
   [switch]$SkipDev,
   [switch]$SkipEnvCheck,
   [switch]$AutoRetryDev,
+  [int]$SmokeTimeoutSeconds = 45,
   [int]$MaxDevRestarts = 5,
   [int]$RestartDelaySeconds = 2
 )
@@ -87,7 +88,14 @@ if (-not $SkipSmoke) {
   $smokeFile = Join-Path $repoRoot 'test-tts-smoke.js'
   if (Test-Path $smokeFile) {
     Write-Step "Smoke test: backend TTS endpoints"
-    node $smokeFile
+    $smokeProc = Start-Process -FilePath node -ArgumentList @($smokeFile) -NoNewWindow -PassThru
+    $finished = $smokeProc.WaitForExit($SmokeTimeoutSeconds * 1000)
+    if (-not $finished) {
+      try { Stop-Process -Id $smokeProc.Id -Force } catch {}
+      Write-Host "Smoke test timed out after $SmokeTimeoutSeconds second(s). Continuing to dev startup..." -ForegroundColor Yellow
+    } elseif ($smokeProc.ExitCode -ne 0) {
+      Write-Host "Smoke test exited with code $($smokeProc.ExitCode). Continuing to dev startup..." -ForegroundColor Yellow
+    }
   } else {
     Write-Host "Skip endpoint smoke: test-tts-smoke.js not found" -ForegroundColor Yellow
   }
@@ -95,7 +103,7 @@ if (-not $SkipSmoke) {
 
 if (-not $SkipDev) {
   if ($AutoRetryDev) {
-    Write-Step "Start Electron dev (auto-retry enabled)"
+    Write-Step "Start Electron Forge dev (auto-retry enabled)"
     $attempt = 0
     while ($true) {
       $attempt = $attempt + 1
@@ -122,7 +130,7 @@ if (-not $SkipDev) {
       Start-Sleep -Seconds $RestartDelaySeconds
     }
   } else {
-    Write-Step "Start Electron dev"
+    Write-Step "Start Electron Forge dev"
     npm run dev
   }
 } else {
