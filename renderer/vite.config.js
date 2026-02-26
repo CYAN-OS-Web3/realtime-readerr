@@ -6,16 +6,19 @@ export default defineConfig({
   plugins: [react()],
   base: './',
   server: {
-    port: 5174,
-    strictPort: true,
+    port: 5173,
+    strictPort: false,
     hmr: {
-      clientPort: 5174
+      protocol: 'ws',
+      host: 'localhost',
+      port: 5173
     }
   },
   build: {
     outDir: 'dist',
     assetsDir: 'assets',
     emptyOutDir: true,
+    sourcemap: false,
     rollupOptions: {
       input: {
         main: resolve(__dirname, 'index.html')

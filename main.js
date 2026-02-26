@@ -1,9 +1,10 @@
-// main.js - Cấu hình Electron và Xử lý Google STT/Translation Streaming (VER MỚI NHẤT)
+// main.js - Cấu hình Electron Forge và Xử lý Google STT/Translation Streaming
 
 const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('path');
 const url = require('url');
 const fs = require('fs');
+const isDev = require('electron-is-dev');
 
 const defaultUserData = app.getPath('userData');
 const customUserData = path.join(defaultUserData, 'CyanDev');
@@ -978,7 +979,7 @@ function createWindow() {
     });
 
     const startUrl = isDev
-        ? 'http://localhost:5174'
+        ? 'http://localhost:5173'
         : `file://${path.join(__dirname, 'renderer/dist/index.html')}`;
 
     mainWindow.loadURL(startUrl);
