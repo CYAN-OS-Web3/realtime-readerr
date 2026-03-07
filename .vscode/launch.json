@@ -9,6 +9,28 @@
       "cwd": "${workspaceFolder}"
     },
     {
+      "name": "Electron Forge Dev (Inspect Main)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npm run dev -- --inspect-electron",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Attach Main (9229)",
+      "type": "node",
+      "request": "attach",
+      "port": 9229,
+      "restart": false,
+      "timeout": 10000
+    },
+    {
+      "name": "Renderer Vite (Chrome)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:5173",
+      "webRoot": "${workspaceFolder}/renderer"
+    },
+    {
       "name": "Electron Forge Start",
       "type": "node-terminal",
       "request": "launch",
@@ -56,6 +78,17 @@
       "request": "launch",
       "command": "npm run package:win",
       "cwd": "${workspaceFolder}"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Forge Dev + Attach Main + Renderer",
+      "configurations": [
+        "Electron Forge Dev (Inspect Main)",
+        "Attach Main (9229)",
+        "Renderer Vite (Chrome)"
+      ],
+      "stopAll": true
     }
   ]
 }

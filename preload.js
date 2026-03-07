@@ -86,11 +86,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.on('tts-audio-chunk', handler);
         return () => ipcRenderer.removeListener('tts-audio-chunk', handler);
     },
+    // Local ONNX TTS chunk
+    onAudioChunkLocal: (callback) => {
+        const handler = (event, chunk) => callback(chunk);
+        ipcRenderer.on('tts-audio-chunk-local', handler);
+        return () => ipcRenderer.removeListener('tts-audio-chunk-local', handler);
+    },
     // Nghe: Audio TTS streaming complete
     onAudioDone: (callback) => {
         const handler = () => callback();
         ipcRenderer.on('tts-audio-done', handler);
         return () => ipcRenderer.removeListener('tts-audio-done', handler);
+    },
+    // Nghe: Local ONNX TTS complete
+    onAudioDoneLocal: (callback) => {
+        const handler = () => callback();
+        ipcRenderer.on('tts-audio-done-local', handler);
+        return () => ipcRenderer.removeListener('tts-audio-done-local', handler);
     },
 
     // Nghe: Deep Link Auth Sync

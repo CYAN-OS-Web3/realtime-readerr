@@ -81,9 +81,15 @@ const ControlHub = () => {
   const ttsPlaybackCtxRef = useRef(null);
   const ttsLastScheduledRef = useRef(0);
   const ttsOutputDestRef = useRef(null);
+  const ttsLocalGainRef = useRef(null);
+  const ttsCloudGainRef = useRef(null);
+  const ttsCloudFadeInDoneRef = useRef(false);
+  const ttsFadeMsRef = useRef(350);
   const keepAliveAudioRef = useRef(null);
   const activeAudioElementsRef = useRef(new Set());
   const workletLoadedRef = useRef(false);
+  const localSpeechUtterRef = useRef(null);
+  const localSpeechLastTextRef = useRef('');
   const [audioInputs, setAudioInputs] = useState([]);
   const [inputDeviceId, setInputDeviceId] = useState('');
   const [audioOutputs, setAudioOutputs] = useState([]);
@@ -95,6 +101,7 @@ const ControlHub = () => {
   }); // Default ON
   const [noiseGateMode, setNoiseGateMode] = useState('adaptive'); // adaptive, manual, off
   const [ambientNoiseLevel, setAmbientNoiseLevel] = useState(0);
+  const [localPreviewEnabled] = useState(true); // quick local TTS preview
 
 
   // Save TTS engine preference to localStorage
@@ -122,6 +129,37 @@ const ControlHub = () => {
       if(cleanupAuth) cleanupAuth();
     };
   }, []);
+
+  // ================================
+  // Local preview TTS (Web Speech API fallback)
+  // ================================
+  const startLocalPreview = (text, langCode) => {
+    if (!localPreviewEnabled) return;
+    if (typeof window === 'undefined' || !window.speechSynthesis || !window.SpeechSynthesisUtterance) return;
+    try {
+      stopLocalPreview();
+      const utter = new SpeechSynthesisUtterance(text);
+      // Map to browser BCP-47
+      utter.lang = (langCode || 'en-US');
+      utter.rate = 1.05;
+      utter.pitch = 1.0;
+      utter.volume = 1.0;
+      utter.onend = () => { localSpeechUtterRef.current = null; };
+      localSpeechUtterRef.current = utter;
+      window.speechSynthesis.speak(utter);
+    } catch (e) {
+      console.warn('local preview speak error', e);
+    }
+  };
+
+  const stopLocalPreview = () => {
+    try {
+      if (localSpeechUtterRef.current && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+    } catch {}
+    localSpeechUtterRef.current = null;
+  };
 
   const handleLogout = () => {
     setAuthUserId('');
@@ -253,6 +291,22 @@ const ControlHub = () => {
             // Keep last 3 entries
             return [newEntry, ...prev].slice(0, 3);
         });
+
+        // Trigger local instant TTS preview (3-5 words) before cloud audio arrives
+        if (localPreviewEnabled) {
+            try {
+                const snippet = (data.translatedText || '').split(/\s+/).slice(0, 5).join(' ');
+                if (snippet && snippet !== localSpeechLastTextRef.current) {
+                    localSpeechLastTextRef.current = snippet;
+                    // Dynamic fade based on length: 250-400ms
+                    const wc = (data.translatedText || '').trim().split(/\s+/).filter(Boolean).length;
+                    ttsFadeMsRef.current = Math.min(400, Math.max(250, wc * 30));
+                    startLocalPreview(snippet, targetLang);
+                }
+            } catch (e) {
+                console.warn('local preview error', e);
+            }
+        }
     });
 
     // STT Transcript (Partial/Final)
@@ -281,12 +335,17 @@ const ControlHub = () => {
 
     // Audio TTS Ready (non-stream)
     const cleanupAudio = window.electronAPI.onAudioReady((audioBuffer) => {
+        stopLocalPreview();
         playAudioBuffer(audioBuffer);
     });
     // Audio TTS Streaming (Azure)
     if (!ttsPlaybackCtxRef.current) {
         ttsPlaybackCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
         ttsOutputDestRef.current = ttsPlaybackCtxRef.current.createMediaStreamDestination();
+        ttsLocalGainRef.current = ttsPlaybackCtxRef.current.createGain();
+        ttsLocalGainRef.current.gain.value = 1.0;
+        ttsCloudGainRef.current = ttsPlaybackCtxRef.current.createGain();
+        ttsCloudGainRef.current.gain.value = 1.0;
         
         // Keep-alive silent audio to prevent AudioContext suspension
         const el = new Audio();
@@ -316,19 +375,73 @@ const ControlHub = () => {
         const src = ctx.createBufferSource();
         src.buffer = buf;
         const startAt = Math.max(ctx.currentTime, ttsLastScheduledRef.current);
-        if (ttsOutputDestRef.current) {
-            src.connect(ttsOutputDestRef.current);
+        const destNode = ttsOutputDestRef.current || ctx.destination;
+        // Cloud gain for fade-in when switching from local
+        if (ttsCloudGainRef.current && destNode) {
+            src.connect(ttsCloudGainRef.current);
+            ttsCloudGainRef.current.connect(destNode);
         } else {
-            src.connect(ctx.destination);
+            src.connect(destNode);
+        }
+        src.start(startAt);
+        ttsLastScheduledRef.current = startAt + buf.duration;
+    };
+    const schedulePcmLocal = (chunk) => {
+        const ctx = ttsPlaybackCtxRef.current;
+        const u8 = (chunk instanceof Uint8Array) ? chunk : new Uint8Array(chunk);
+        const ab = u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength);
+        const int16 = new Int16Array(ab);
+        const float = toFloat32(int16);
+        const buf = ctx.createBuffer(1, float.length, 16000);
+        buf.copyToChannel(float, 0);
+        const src = ctx.createBufferSource();
+        src.buffer = buf;
+        const startAt = Math.max(ctx.currentTime, ttsLastScheduledRef.current);
+        // Local gain for fade-out later
+        if (ttsLocalGainRef.current && ttsOutputDestRef.current) {
+            src.connect(ttsLocalGainRef.current);
+            ttsLocalGainRef.current.connect(ttsOutputDestRef.current);
+        } else {
+            src.connect(ttsOutputDestRef.current || ctx.destination);
         }
         src.start(startAt);
         ttsLastScheduledRef.current = startAt + buf.duration;
     };
     const cleanupChunk = window.electronAPI.onAudioChunk((chunk) => {
+        stopLocalPreview();
         try { schedulePcm(chunk); } catch (e) { console.error('Playback chunk error:', e); }
+        // fade out local when cloud arrives
+        if (ttsLocalGainRef.current) {
+            const now = ttsPlaybackCtxRef.current.currentTime;
+            ttsLocalGainRef.current.gain.cancelScheduledValues(now);
+            ttsLocalGainRef.current.gain.setValueAtTime(ttsLocalGainRef.current.gain.value, now);
+            ttsLocalGainRef.current.gain.linearRampToValueAtTime(0.0, now + ttsFadeMsRef.current / 1000);
+        }
+        // fade in cloud if not yet
+        if (ttsCloudGainRef.current && !ttsCloudFadeInDoneRef.current) {
+            const now = ttsPlaybackCtxRef.current.currentTime;
+            ttsCloudGainRef.current.gain.cancelScheduledValues(now);
+            ttsCloudGainRef.current.gain.setValueAtTime(0.0, now);
+            ttsCloudGainRef.current.gain.linearRampToValueAtTime(1.0, now + ttsFadeMsRef.current / 1000);
+            ttsCloudFadeInDoneRef.current = true;
+        }
+    });
+    const cleanupChunkLocal = window.electronAPI.onAudioChunkLocal?.((chunk) => {
+        try { schedulePcmLocal(chunk); } catch (e) { console.error('Playback local chunk error:', e); }
     });
     const cleanupDone = window.electronAPI.onAudioDone(() => {
         ttsLastScheduledRef.current = Math.max(ttsPlaybackCtxRef.current.currentTime, ttsLastScheduledRef.current);
+        stopLocalPreview();
+        ttsCloudFadeInDoneRef.current = false;
+    });
+    const cleanupDoneLocal = window.electronAPI.onAudioDoneLocal?.(() => {
+        if (ttsLocalGainRef.current) {
+            const now = ttsPlaybackCtxRef.current.currentTime;
+            ttsLocalGainRef.current.gain.cancelScheduledValues(now);
+            ttsLocalGainRef.current.gain.setValueAtTime(ttsLocalGainRef.current.gain.value, now);
+            ttsLocalGainRef.current.gain.linearRampToValueAtTime(0.0, now + ttsFadeMsRef.current / 1000);
+        }
+        ttsCloudFadeInDoneRef.current = false;
     });
 
     // Logs
@@ -374,7 +487,9 @@ const ControlHub = () => {
         cleanupAudio();
         cleanupLogs();
         cleanupChunk();
+        if (cleanupChunkLocal) cleanupChunkLocal();
         cleanupDone();
+        if (cleanupDoneLocal) cleanupDoneLocal();
         if (ttsPlaybackCtxRef.current) {
             try { ttsPlaybackCtxRef.current.close(); } catch {}
             ttsPlaybackCtxRef.current = null;
@@ -620,19 +735,20 @@ const ControlHub = () => {
             // Adaptive threshold calculation
             let effectiveThreshold;
             if (noiseGateMode === 'adaptive') {
-                // Dynamic threshold based on ambient noise
-                const noiseMultiplier = 1.2; // Reduced: Voice chỉ cần 20% above ambient
+                // Dynamic threshold based on ambient noise (more permissive)
+                const noiseMultiplier = 1.02; // Voice chỉ cần 2% trên nền
                 const baseThreshold = currentAmbient * noiseMultiplier;
-                const userThreshold = sensitivityRef.current / 2;
+                const userThreshold = sensitivityRef.current / 4; // nhạy hơn nữa
                 effectiveThreshold = Math.max(baseThreshold, userThreshold);
                 adaptiveThresholdRef.current = effectiveThreshold;
             } else {
-                effectiveThreshold = sensitivityRef.current / 2;
+                effectiveThreshold = sensitivityRef.current / 4; // nhạy hơn
             }
             
             // Noise gate control
             if (noiseGateRef.current) {
-                const gateGain = vol > effectiveThreshold ? 1 : 0;
+                // Cho phép pass-through mạnh hơn khi dưới ngưỡng để tránh kẹt gate
+                const gateGain = vol > effectiveThreshold ? 1 : 0.6;
                 noiseGateRef.current.gain.setValueAtTime(gateGain, audioCtx.currentTime);
                 
                 // Debug noise gate every 60 frames
@@ -652,8 +768,8 @@ const ControlHub = () => {
                 }
             }
 
-            // ALWAYS send audio when noise reduction is OFF, or when above threshold
-            if (!noiseReduction || vol > effectiveThreshold) {
+            // ALWAYS send audio when noise reduction is OFF, hoặc khi vượt 30% ngưỡng để tránh kẹt
+            if (!noiseReduction || vol > effectiveThreshold * 0.3) {
                 lastVoiceAtRef.t = Date.now();
                 hasSentDataRef.current = true;
                 
@@ -706,10 +822,10 @@ const ControlHub = () => {
             } else {
                 const now = Date.now();
                 const silenceMs = now - lastVoiceAtRef.t;
-                if (silenceMs > 700) {
-                    if (now - lastFinalizeTsRef.t > 2000) { // Tăng debounce lên 2s
+                if (silenceMs > 1200) {
+                    if (now - lastFinalizeTsRef.t > 2500) { // Tăng debounce lên 2.5s
                         if (hasSentDataRef.current) {
-                            console.log('[App] Silence detected (>700ms). Sending finalizeUtterance...');
+                            console.log('[App] Silence detected (>1200ms). Sending finalizeUtterance...');
                             lastFinalizeTsRef.t = now;
                             hasSentDataRef.current = false;
                             if (window.electronAPI) {

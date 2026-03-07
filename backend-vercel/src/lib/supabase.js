@@ -211,6 +211,32 @@ async function setUserPlan(userId, plan){
 module.exports.clearDeviceVoice = clearDeviceVoice
 module.exports.setUserPlan = setUserPlan
 
+// Simple TTS cache (keyed by hash): assumes table tts_cache(key text primary key, audio text, content_type text, provider text, updated_at timestamp)
+async function getCachedTts(key){
+  if (!supabase) return null
+  try{
+    const { data } = await supabase.from('tts_cache').select('audio,content_type,provider').eq('key', key).single()
+    if (data && data.audio) return { audio: data.audio, contentType: data.content_type || 'audio/mpeg', provider: data.provider || 'cache' }
+    return null
+  } catch(e){ return null }
+}
+
+async function putCachedTts(key, audioBase64, contentType, provider){
+  if (!supabase || !key || !audioBase64) return
+  try{
+    await supabase.from('tts_cache').upsert({
+      key,
+      audio: audioBase64,
+      content_type: contentType || 'audio/mpeg',
+      provider: provider || 'unknown',
+      updated_at: new Date().toISOString()
+    })
+  } catch(e){}
+}
+
+module.exports.getCachedTts = getCachedTts
+module.exports.putCachedTts = putCachedTts
+
 // Simple token bucket rate-limit per minute, backed by Supabase
 async function checkRateLimit(userId, tokens, plan){
   if (!userId) return false

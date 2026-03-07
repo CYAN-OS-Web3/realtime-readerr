@@ -1,9 +1,12 @@
 // main.js - Cấu hình Electron Forge và Xử lý Google STT/Translation Streaming
 
 const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const fs = require('fs');
 const path = require('path');
 const url = require('url');
-const fs = require('fs');
+const axios = require('axios');
+const { Piper } = require('./piper-handler');
+
 // Manual dev detection to avoid ESM require issues
 const isDev = process.env.NODE_ENV === 'development' || process.argv.includes('--dev') || !app.isPackaged;
 
@@ -12,6 +15,61 @@ const customUserData = path.join(defaultUserData, 'CyanDev');
 try {
   fs.mkdirSync(customUserData, { recursive: true });
 } catch {}
+
+// Local ONNX TTS (Piper) for instant snippet
+async function loadPiper(langCode){
+    const lc = (langCode || '').toLowerCase();
+    if (lc.startsWith('vi')){
+        if (!piperVi){
+            piperVi = new Piper(
+                path.join(__dirname, 'assets', 'models', 'vi_VN-vivos-x_low.onnx'),
+                path.join(__dirname, 'assets', 'models', 'vi_VN-vivos-x_low.onnx.json')
+            );
+            await piperVi.load();
+        }
+        return piperVi;
+    }
+    // default en
+    if (!piperEn){
+        piperEn = new Piper(
+            path.join(__dirname, 'assets', 'models', 'en_US-lessac-medium.onnx'),
+            path.join(__dirname, 'assets', 'models', 'en_US-lessac-medium.onnx.json')
+        );
+        await piperEn.load();
+    }
+    return piperEn;
+}
+
+function resample22050To16000(int16){
+    // simple linear resample
+    const ratio = 16000/22050;
+    const outLen = Math.floor(int16.length * ratio);
+    const out = new Int16Array(outLen);
+    for(let i=0;i<outLen;i++){
+        const src = i/ratio;
+        const s0 = Math.floor(src);
+        const s1 = Math.min(s0+1, int16.length-1);
+        const t = src - s0;
+        out[i] = (1-t)*int16[s0] + t*int16[s1];
+    }
+    return out;
+}
+
+async function synthLocalSnippet(text, targetLang){
+    try{
+        const snippet = (text||'').split(/\s+/).slice(0,5).join(' ');
+        if (!snippet || snippet.length < MIN_TTS_CHARS) return;
+        const p = await loadPiper(targetLang);
+        if (!p) return;
+        const audio = await p.synthesize(snippet, { lengthScale: 1.0, noise: 0.667, noiseW: 0.8 });
+        const pcm16 = new Int16Array(audio.samples.buffer);
+        const pcm16k = resample22050To16000(pcm16);
+        sendToRenderer('tts-audio-chunk-local', new Uint8Array(pcm16k.buffer));
+        sendToRenderer('tts-audio-done-local');
+    }catch(e){
+        console.warn('synthLocalSnippet failed', e.message);
+    }
+}
 app.setPath('userData', customUserData);
 app.commandLine.appendSwitch('disk-cache-dir', path.join(customUserData, 'Cache'));
 app.commandLine.appendSwitch('media-cache-dir', path.join(customUserData, 'MediaCache'));
@@ -105,12 +163,22 @@ const ttsClient = new TextToSpeechClient();
 let recognizeStream = null;
 let mainWindow = null;
 let overlayWindow = null;
+let piperEn = null;
+let piperVi = null;
+const MIN_TTS_CHARS = 8;
 let currentSettings = {
     sourceLang: 'en-US', 
     targetLang: 'vi', 
     ttsEngine: 'google',
     sensitivity: 50
 };
+// TTS throttle state to avoid spamming provider (429)
+let lastTtsAt = 0;
+let ttsInFlight = false;
+let ttsPendingTimer = null;
+let ttsPendingText = '';
+const MIN_TTS_GAP_MS = 400; // shorter gap when using debounce queue
+const TTS_DEBOUNCE_MS = 400; // wait a short window to aggregate text
 let isStreaming = false;
 // STT partial aggregation for low-latency TTS without cutting too small
 let sttLastSentIdx = 0;
@@ -368,64 +436,71 @@ async function callElevenLabsTTSService(text, targetLang) {
 }
 
 async function callAzureTTSService(text, targetLang) {
+    const languageCode = normalizeLang(targetLang);
+    if (!azureKey || !azureRegion) {
+        // fallback to backend streaming if no key
+        return streamWaveNetOnce(text, targetLang, true);
+    }
+    let synthesizer = null;
     try {
-        const userId = getInstallId();
-        const languageCode = normalizeLang(targetLang);
-        const response = await fetch(`${BACKEND_URL}/api/tts/speak-stream`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                text,
-                language: languageCode,
-                gender: 'female',
-                user_id: userId,
-                device_id: userId,
-                tts_engine: 'azure'
-            })
+        const speechConfig = sdk.SpeechConfig.fromSubscription(azureKey, azureRegion);
+        speechConfig.speechSynthesisLanguage = languageCode;
+        speechConfig.speechSynthesisVoiceName = getAzureVoiceName(targetLang);
+        speechConfig.setProperty(
+            sdk.PropertyId.SpeechServiceConnection_SynthOutputFormat,
+            sdk.SpeechSynthesisOutputFormat.Raw16Khz16BitMonoPcm
+        );
+
+        const pullStream = sdk.AudioOutputStream.createPullStream();
+        const audioConfig = sdk.AudioConfig.fromStreamOutput(pullStream);
+        synthesizer = new sdk.SpeechSynthesizer(speechConfig, audioConfig);
+
+        const readChunks = async () => {
+            while (true) {
+                const chunk = pullStream.read();
+                if (!chunk || chunk.length === 0) break;
+                sendToRenderer('tts-audio-chunk', new Uint8Array(chunk));
+            }
+        };
+
+        const donePromise = new Promise((resolve, reject) => {
+            synthesizer.synthesisCompleted = () => resolve();
+            synthesizer.canceled = (_s, e) => reject(new Error(e.errorDetails || 'azure_synthesis_canceled'));
         });
 
-        if (!response.ok) {
-            throw new Error(`Backend Azure TTS stream error: ${response.status}`);
-        }
-
-        // Handle streaming response
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
-            
-            for (const line of lines) {
-                if (line.trim()) {
-                    try {
-                        const data = JSON.parse(line);
-                        if (data.audio) {
-                            const audioBuffer = Buffer.from(data.audio, 'base64');
-                            sendToRenderer('tts-audio-chunk', new Uint8Array(audioBuffer));
-                        }
-                    } catch (e) {
-                        // Ignore malformed JSON lines
-                    }
-                }
-            }
-        }
-        
+        synthesizer.startSpeakingTextAsync(text);
+        await donePromise;
+        await readChunks();
         sendToRenderer('tts-audio-done');
         sendToRenderer('log-message', `Azure TTS streaming: Phát thành công (${languageCode}).`, 'success');
     } catch (e) {
         sendToRenderer('log-message', `Lỗi Azure TTS streaming: ${e.message}`, 'error');
+    } finally {
+        try { synthesizer?.close(); } catch {}
     }
 }
 
 async function callGoogleWaveNetTTSService(text, targetLang) {
+    return callGoogleWaveNetChunkedTTSService(text, targetLang);
+}
+
+function splitIntoSegments(text){
+    const words = (text || '').trim().split(/\s+/).filter(Boolean);
+    if (words.length === 0) return [];
+    if (words.length <= 8) return [text];
+    const segments = [];
+    let i = 0;
+    while (i < words.length){
+        const remain = words.length - i;
+        const sz = Math.min(Math.max(6, Math.min(8, remain)), remain);
+        const chunkWords = words.slice(i, i + sz);
+        segments.push(chunkWords.join(' '));
+        i += sz;
+    }
+    return segments;
+}
+
+async function streamWaveNetOnce(text, targetLang, sendDone){
     try {
         const langCodeMap = {
             'en': 'en-US', 'vi': 'vi-VN', 'es': 'es-ES', 'fr': 'fr-FR', 'de': 'de-DE',
@@ -489,12 +564,25 @@ async function callGoogleWaveNetTTSService(text, targetLang) {
             }
         }
         
-        sendToRenderer('tts-audio-done');
+        if (sendDone !== false){
+            sendToRenderer('tts-audio-done');
+        }
         sendToRenderer('log-message', `Backend TTS streaming: Phát thành công (${languageCode}).`, 'success');
 
     } catch (e) {
         sendToRenderer('log-message', `Lỗi kết nối/gọi Backend TTS: ${e.message}`, 'error');
         console.error('Backend TTS Error:', e);
+    }
+}
+
+async function callGoogleWaveNetChunkedTTSService(text, targetLang){
+    const segments = splitIntoSegments(text || '');
+    if (segments.length === 0) return;
+    for (let idx = 0; idx < segments.length; idx++){
+        const isLast = idx === segments.length - 1;
+        // do not await each; start next quickly to reduce perceived gap
+        // eslint-disable-next-line no-await-in-loop
+        await streamWaveNetOnce(segments[idx], targetLang, isLast);
     }
 }
 // 6. XỬ LÝ DỊCH THUẬT VÀ TTS (GIỮ NGUYÊN)
@@ -529,6 +617,11 @@ async function translateAndSpeak(text, targetLang, ttsEngine) {
             translatedText: translatedText 
         });
 
+        // Fire-and-forget local snippet using ONNX (best effort)
+        synthLocalSnippet(translatedText, targetLang).catch((e)=>{
+            console.warn('Local snippet synth error', e.message);
+        });
+
         try {
             if (overlayAlive && overlayWindow && !overlayWindow.isDestroyed() && overlayWindow.webContents && !overlayWindow.webContents.isDestroyed()) {
                 overlayWindow.webContents.send('translation-result', translatedText);
@@ -554,6 +647,45 @@ async function translateAndSpeak(text, targetLang, ttsEngine) {
         sendToRenderer('log-message', `Lỗi Dịch thuật/TTS: ${e.message}`, 'error');
         console.error('Translation/TTS Error:', e);
     }
+}
+
+// Simple throttle to avoid spamming TTS provider (429)
+async function tryTranslateAndSpeak(text, targetLang, ttsEngine) {
+    const now = Date.now();
+    const trimmed = (text || '').trim();
+    if (trimmed.length < MIN_TTS_CHARS) {
+        console.log(`⏩ Skip TTS: text too short (${trimmed.length} chars)`);
+        return;
+    }
+    if (now - lastTtsAt < MIN_TTS_GAP_MS) {
+        console.log(`⏩ Skip TTS: gap too short (${now - lastTtsAt}ms < ${MIN_TTS_GAP_MS}ms)`);
+        return;
+    }
+    if (ttsInFlight) {
+        console.log('⏩ Skip TTS: another TTS in flight');
+        return;
+    }
+    lastTtsAt = now;
+    ttsInFlight = true;
+    try {
+        await translateAndSpeak(trimmed, targetLang, ttsEngine);
+    } finally {
+        ttsInFlight = false;
+    }
+}
+
+function enqueueTts(text, targetLang, ttsEngine) {
+    const trimmed = (text || '').trim();
+    if (trimmed.length < MIN_TTS_CHARS) {
+        console.log(`⏩ Skip enqueue: text too short (${trimmed.length} chars)`);
+        return;
+    }
+    ttsPendingText = trimmed;
+    if (ttsPendingTimer) clearTimeout(ttsPendingTimer);
+    ttsPendingTimer = setTimeout(() => {
+        ttsPendingTimer = null;
+        tryTranslateAndSpeak(ttsPendingText, targetLang, ttsEngine);
+    }, TTS_DEBOUNCE_MS);
 }
 
 
@@ -823,7 +955,7 @@ function handleSTTData(data) {
         sendToRenderer('stt-final', transcript);
         sendToRenderer('log-message', `Nhận được transcript (final): ${transcript}`, 'info');
         if (!didTranslateForUtterance) {
-            translateAndSpeak(transcript, currentSettings.targetLang, currentSettings.ttsEngine);
+            enqueueTts(transcript, currentSettings.targetLang, currentSettings.ttsEngine);
             didTranslateForUtterance = true;
         }
     } else {
@@ -995,8 +1127,10 @@ function createWindow() {
         icon: path.join(__dirname, 'assets/icon.png')
     });
 
+    // Check environment variable for port or default to 5173
+    const port = process.env.PORT || 5173;
     const startUrl = isDev
-        ? 'http://localhost:5173'
+        ? `http://localhost:${port}`
         : `file://${path.join(__dirname, 'renderer/dist/index.html')}`;
 
     mainWindow.loadURL(startUrl);
