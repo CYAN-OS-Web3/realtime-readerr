@@ -70,6 +70,7 @@
     "microsoft-cognitiveservices-speech-sdk": "^1.47.0",
     "multer": "^1.4.5-lts.1",
     "node-fetch": "^2.6.7",
+    "onnxruntime-node": "^1.18.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3"
   },
