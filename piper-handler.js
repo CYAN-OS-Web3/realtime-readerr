@@ -31,9 +31,16 @@ class Piper {
         const inputTensor = new ort.Tensor('int64', BigInt64Array.from(inputIds), [1, inputIds.length]);
         const inputLengthsTensor = new ort.Tensor('int64', BigInt64Array.from([inputIds.length]), [1]);
 
+        // Build scales tensor for Piper VITS model
+        const lengthScale = options.lengthScale ?? 1.0;
+        const noise = options.noise ?? 0.667;
+        const noiseW = options.noiseW ?? 0.8;
+        const scalesTensor = new ort.Tensor('float32', new Float32Array([noise, lengthScale, noiseW]), [3]);
+
         const feeds = {
-            'input_ids': inputTensor,
-            'input_lengths': inputLengthsTensor
+            'input': inputTensor,
+            'input_lengths': inputLengthsTensor,
+            'scales': scalesTensor
         };
 
         // The actual outputs depend on the Piper ONNX model.
