@@ -9,6 +9,7 @@
     "electron:dev": "npm run dev",
     "start:renderer": "cd renderer && npm run dev",
     "build:renderer": "cd renderer && npm run build",
+    "build:dev": "cd renderer && npm run build",
     "doctor": "powershell -ExecutionPolicy Bypass -File ./scripts/doctor.ps1",
     "doctor:check": "powershell -ExecutionPolicy Bypass -File ./scripts/doctor.ps1 -SkipDev",
     "doctor:remote": "powershell -ExecutionPolicy Bypass -File ./scripts/doctor.ps1 -SkipEnvCheck",
