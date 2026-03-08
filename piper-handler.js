@@ -17,7 +17,7 @@ class Piper {
         console.log('Piper config loaded:', this.config);
     }
 
-    async synthesize(text) {
+    async synthesize(text, options = {}) {
         if (!this.session || !this.config) {
             throw new Error('Piper model not loaded. Call load() first.');
         }
