@@ -468,7 +468,6 @@ async function cloneAndStream(req, res){
   }
 }
 
-module.exports = { cloneAndSpeak, cloneAndStream, speak }
 // Chunked speak streaming for sub-400ms first byte on standard engines
 function chunkText(input){
   const parts = input.split(/([.!?，。！？…]+\s+)/).filter(Boolean)
