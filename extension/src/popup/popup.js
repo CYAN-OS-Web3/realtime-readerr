@@ -84,7 +84,7 @@ document.getElementById('enableSite').addEventListener('click', async () => {
     'whereby.com': ['https://*.whereby.com/*']
   }
   const key = Object.keys(patterns).find(k => host === k || host.endsWith(k))
-  if (!key) { document.getElementById('walletStatus').textContent = 'Unsupported site'; return }
+  if (!key) { document.getElementById('footerState').textContent = 'Unsupported site'; return }
   await chrome.permissions.request({ origins: patterns[key] })
   await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content/injector.js'], world: 'MAIN' })
   await chrome.tabs.sendMessage(tab.id, { type: 'INIT_AI_CONTEXT' })

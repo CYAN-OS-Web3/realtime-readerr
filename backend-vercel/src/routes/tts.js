@@ -542,6 +542,4 @@ async function speakChunked(req, res){
   }
 }
 
-module.exports.speakChunked = speakChunked
-module.exports.speakStream = speakStream
-module.exports.speakPcmStream = speakPcmStream
+module.exports = { cloneAndSpeak, cloneAndStream, speak, speakChunked, speakStream, speakPcmStream }

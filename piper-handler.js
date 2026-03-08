@@ -48,7 +48,8 @@ class Piper {
         const results = await this.session.run(feeds);
         
         // Assuming 'output' is the audio waveform tensor
-        const audioSamples = results.output.data; 
+        const outputKey = Object.keys(results)[0] || 'output';
+        const audioSamples = results[outputKey].data; 
 
         return { samples: new Float32Array(audioSamples) };
     }

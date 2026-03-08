@@ -4,7 +4,6 @@ const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const url = require('url');
-const axios = require('axios');
 const { Piper } = require('./piper-handler');
 
 // Manual dev detection to avoid ESM require issues

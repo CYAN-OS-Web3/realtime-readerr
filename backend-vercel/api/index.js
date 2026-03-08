@@ -141,8 +141,6 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'internal_server_error', details: err.message || 'unknown' })
 })
 
-module.exports = app
-
 app.get('/api/docs', (req, res) => {
   const specUrl = '/api/openapi.json'
   res.set('Content-Type', 'text/html; charset=utf-8')
