@@ -318,9 +318,9 @@ async function speakPcmStream(req, res){
     const plan = await supa.getUserPlan(userId)
     
     // Anti-abuse: check for RapidAPI consumer and apply slightly higher limits (not 3x anymore)
+    const isRapidApi = req.headers['x-rapidapi-key'] && req.headers['x-rapidapi-user']
     let rateLimitTokens = Math.max(1, Math.ceil(chars / 10))
     if (isRapidApi) {
-      // Only 1.5x cost for RapidAPI (more reasonable)
       rateLimitTokens = Math.max(rateLimitTokens * 1.5, Math.ceil(chars / 7))
     }
     const allow = await supa.checkRateLimit(limiterId, rateLimitTokens, plan)
@@ -468,7 +468,6 @@ async function cloneAndStream(req, res){
   }
 }
 
-module.exports = { cloneAndSpeak, cloneAndStream, speak }
 // Chunked speak streaming for sub-400ms first byte on standard engines
 function chunkText(input){
   const parts = input.split(/([.!?，。！？…]+\s+)/).filter(Boolean)
@@ -543,6 +542,4 @@ async function speakChunked(req, res){
   }
 }
 
-module.exports.speakChunked = speakChunked
-module.exports.speakStream = speakStream
-module.exports.speakPcmStream = speakPcmStream
+module.exports = { cloneAndSpeak, cloneAndStream, speak, speakChunked, speakStream, speakPcmStream }

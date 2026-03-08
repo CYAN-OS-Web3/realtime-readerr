@@ -15,10 +15,4 @@ root.render(
   </React.StrictMode>
 );
 
-// Kết nối với main process
-if (window.electronAPI) {
-  window.electronAPI.handleCounter((event, value) => {
-    // Xử lý sự kiện từ main process nếu cần
-    console.log('Received from main process:', value);
-  });
-}
+// Connected to main process via electronAPI bridge

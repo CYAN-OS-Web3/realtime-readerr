@@ -17,7 +17,7 @@ class Piper {
         console.log('Piper config loaded:', this.config);
     }
 
-    async synthesize(text) {
+    async synthesize(text, options = {}) {
         if (!this.session || !this.config) {
             throw new Error('Piper model not loaded. Call load() first.');
         }
@@ -31,9 +31,16 @@ class Piper {
         const inputTensor = new ort.Tensor('int64', BigInt64Array.from(inputIds), [1, inputIds.length]);
         const inputLengthsTensor = new ort.Tensor('int64', BigInt64Array.from([inputIds.length]), [1]);
 
+        // Build scales tensor for Piper VITS model
+        const lengthScale = options.lengthScale ?? 1.0;
+        const noise = options.noise ?? 0.667;
+        const noiseW = options.noiseW ?? 0.8;
+        const scalesTensor = new ort.Tensor('float32', new Float32Array([noise, lengthScale, noiseW]), [3]);
+
         const feeds = {
-            'input_ids': inputTensor,
-            'input_lengths': inputLengthsTensor
+            'input': inputTensor,
+            'input_lengths': inputLengthsTensor,
+            'scales': scalesTensor
         };
 
         // The actual outputs depend on the Piper ONNX model.
@@ -41,7 +48,8 @@ class Piper {
         const results = await this.session.run(feeds);
         
         // Assuming 'output' is the audio waveform tensor
-        const audioSamples = results.output.data; 
+        const outputKey = Object.keys(results)[0] || 'output';
+        const audioSamples = results[outputKey].data; 
 
         return { samples: new Float32Array(audioSamples) };
     }
