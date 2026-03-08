@@ -318,9 +318,9 @@ async function speakPcmStream(req, res){
     const plan = await supa.getUserPlan(userId)
     
     // Anti-abuse: check for RapidAPI consumer and apply slightly higher limits (not 3x anymore)
+    const isRapidApi = req.headers['x-rapidapi-key'] && req.headers['x-rapidapi-user']
     let rateLimitTokens = Math.max(1, Math.ceil(chars / 10))
     if (isRapidApi) {
-      // Only 1.5x cost for RapidAPI (more reasonable)
       rateLimitTokens = Math.max(rateLimitTokens * 1.5, Math.ceil(chars / 7))
     }
     const allow = await supa.checkRateLimit(limiterId, rateLimitTokens, plan)
