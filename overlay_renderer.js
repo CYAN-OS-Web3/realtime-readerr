@@ -1,27 +1,25 @@
-// overlay_renderer.js - Logic cho cửa sổ Overlay (phụ)
+// overlay_renderer.js - Logic for Overlay Window (Subtitles)
+// Uses window.electronAPI exposed via preload-overlay.js
 
-const { ipcRenderer } = require('electron');
+const CHANNEL_NAME = 'translation-result';
 
-// Kênh IPC này phải khớp với kênh bạn đã sửa trong main.js
-const CHANNEL_NAME = 'translation-result'; 
+if (window.electronAPI && window.electronAPI.onTranslationResult) {
+    window.electronAPI.onTranslationResult((translatedText) => {
+        const outputElement = document.getElementById('translation-output');
+        if (!outputElement) return;
 
-// Listener nhận bản dịch cuối cùng từ Main Process
-ipcRenderer.on(CHANNEL_NAME, (event, translatedText) => {
-    const outputElement = document.getElementById('translation-output');
-    
-    // 1. Cập nhật nội dung dịch thuật
-    outputElement.textContent = translatedText;
-    
-    // 2. Tự động xóa văn bản sau 10 giây để tránh làm bẩn màn hình
-    setTimeout(() => {
-        outputElement.textContent = '';
-        // CSS trong overlay.html đã ẩn element khi nó rỗng (empty), 
-        // nên không cần phải thay đổi visibility
-    }, 10000); // 10 giây
-});
+        // 1. Update translated text
+        outputElement.textContent = translatedText;
+        
+        // 2. Clear text after 10s
+        setTimeout(() => {
+            outputElement.textContent = '';
+        }, 10000);
+    });
+}
 
-// Listener tùy chọn để nhận log từ Main Process
-ipcRenderer.on('log-message', (event, message, type) => {
-    // Không làm gì cả, vì overlay không cần hiển thị log
-    console.log(`[Overlay Log] ${type}: ${message}`);
-});
+if (window.electronAPI && window.electronAPI.onLogMessage) {
+    window.electronAPI.onLogMessage((message, type) => {
+        console.log(`[Overlay Log] ${type}: ${message}`);
+    });
+}

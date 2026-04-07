@@ -15,7 +15,9 @@
     "@tailwindcss/typography": "^0.5.19",
     "lucide-react": "^0.561.0",
     "react": "^19.2.3",
-    "react-dom": "^19.2.3"
+    "react-dom": "^19.2.3",
+    "sonner": "^2.0.7",
+    "zustand": "^5.0.12"
   },
   "devDependencies": {
     "@tailwindcss/postcss7-compat": "^2.2.17",

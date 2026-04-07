@@ -22,8 +22,55 @@ let mediaStream = null;
 let source = null;
 let processor = null;
 let gainNode = null;
-let audioPlayer = new Audio(); // Trình phát audio cho TTS
 let currentDraftTranscript = '';
+
+// --- Simple Audio Queue for Seamless Playback ---
+class SimpleAudioQueue {
+    constructor() {
+        this.queue = [];
+        this.isPlaying = false;
+        this.audioElement = new Audio();
+        this.audioElement.onended = () => this.playNext();
+    }
+    
+    add(audioBuffer) {
+        const blob = new Blob([audioBuffer], { type: 'audio/mp3' });
+        const url = URL.createObjectURL(blob);
+        this.queue.push(url);
+        if (!this.isPlaying) this.playNext();
+    }
+    
+    playNext() {
+        if (this.queue.length === 0) {
+            this.isPlaying = false;
+            return;
+        }
+        this.isPlaying = true;
+        const currentUrl = this.queue.shift();
+        this.audioElement.src = currentUrl;
+        this.audioElement.play().catch(e => {
+            console.warn('Playback error, skipping chunk', e);
+            this.playNext();
+        });
+        
+        // Clean up URL object after loading
+        this.audioElement.oncanplay = () => {
+            // Give it a moment to stabilize before revoking if needed, 
+            // but usually safe to revoke after src is set if the browser buffers it
+        };
+    }
+
+    clear() {
+        this.queue.forEach(url => URL.revokeObjectURL(url));
+        this.queue = [];
+        this.audioElement.pause();
+        this.isPlaying = false;
+    }
+}
+
+const ttsQueue = new SimpleAudioQueue();
+const preRollBuffer = []; // Last 300ms of audio (Float32Array chunks)
+let isVoiceActive = false;
 
 // =========================================================
 // 2. Hàm chuyển đổi Float32 sang Int16 (Định dạng Google STT yêu cầu)
@@ -84,8 +131,12 @@ async function startAudioCapture(sensitivity) {
         // Logic gửi audio data và tính Mic Level
         processor.onaudioprocess = (e) => {
             const inputData = e.inputBuffer.getChannelData(0);
-            const raw = convertFloat32ToInt16(inputData);
             
+            // 0. Update Pre-roll Buffer (Copying to avoid buffer reuse issues)
+            const chunkCopy = new Float32Array(inputData);
+            preRollBuffer.push(chunkCopy);
+            if (preRollBuffer.length > 3) preRollBuffer.shift(); // 3 chunks * 100ms = 300ms
+
             // 1. TÍNH TOÁN RMS (Mức Âm Lượng)
             let sumOfSquares = 0;
             for (let i = 0; i < inputData.length; i++) {
@@ -95,13 +146,27 @@ async function startAudioCapture(sensitivity) {
             
             // 2. CẬP NHẬT THANH MIC LEVEL
             const micLevelBar = document.getElementById('mic-level-bar');
-            // Chuyển RMS (0.0 đến 1.0) thành phần trăm (0% đến 100%)
-            // Nhân với 150 để tạo ra phản hồi trực quan tốt hơn
             const level = Math.min(100, Math.round(rms * 150)); 
-            micLevelBar.style.width = `${level}%`;
-            
-            // 3. GỬI AUDIO DATA CHO MAIN PROCESS
-            ipcRenderer.send('audio-chunk', raw); 
+            if (micLevelBar) {
+                micLevelBar.style.width = `${level}%`;
+            }
+
+            // 3. NOISE GATE WITH PRE-ROLL
+            const sensitivity = parseInt(document.getElementById('sensitivity').value, 10);
+            const threshold = (100 - sensitivity) / 200; // Adjusted for RMS 0.0-1.0
+
+            if (rms > threshold) {
+                if (!isVoiceActive) {
+                    console.log('[Renderer] Voice Triggered - Prepending Pre-roll');
+                    preRollBuffer.forEach(prevChunk => {
+                        ipcRenderer.send('audio-chunk', convertFloat32ToInt16(prevChunk));
+                    });
+                    isVoiceActive = true;
+                }
+                ipcRenderer.send('audio-chunk', convertFloat32ToInt16(inputData));
+            } else {
+                isVoiceActive = false;
+            }
         };
 
 
@@ -205,22 +270,28 @@ function scrollToSelectedOption(selectElement) {
 // =========================================================
 
 function playTtsAudio(audioBuffer) {
-    const blob = new Blob([audioBuffer], { type: 'audio/mp3' }); 
-    const url = URL.createObjectURL(blob);
-    
-    audioPlayer.src = url;
-    audioPlayer.play().catch(e => {
-        appendLog(`Lỗi phát TTS: ${e.message}. Đảm bảo đã click vào cửa sổ ứng dụng.`, 'error');
-    });
-
-    audioPlayer.onended = () => {
-        URL.revokeObjectURL(url); // Giải phóng bộ nhớ
-    };
+    if (!audioBuffer) return;
+    ttsQueue.add(audioBuffer);
 }
 
 
+// 6. Loading Screen Control
 // =========================================================
-// 6. Listener cho IPC và DOM
+
+function hideLoadingScreen() {
+    const loader = document.getElementById('loading-screen');
+    if (loader) {
+        // Add fade-out class to trigger CSS transition
+        loader.classList.add('fade-out');
+        // Remove from DOM after transition completes to save resources
+        setTimeout(() => {
+            loader.remove();
+        }, 800);
+    }
+}
+
+// =========================================================
+// 7. Listener cho IPC và DOM
 // =========================================================
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -286,6 +357,10 @@ document.addEventListener('DOMContentLoaded', () => {
     ipcRenderer.on('tts-audio-ready', (event, audioBuffer) => {
         playTtsAudio(audioBuffer);
     });
+
+    ipcRenderer.on('tts-audio-chunk', (event, audioBuffer) => {
+        playTtsAudio(audioBuffer);
+    });
     
     // Nhận Log Message
     window.electronAPI.on('log-message', (event, message, type) => {
@@ -329,4 +404,7 @@ document.addEventListener('DOMContentLoaded', () => {
     
     updateTargetLanguageDisplay();
     appendLog('Control Hub Ready. Check API Keys in main.js', 'info');
+    
+    // Hide loading screen with a slight delay for aesthetic smoothness
+    setTimeout(hideLoadingScreen, 700);
 });

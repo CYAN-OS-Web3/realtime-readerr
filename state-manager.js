@@ -7,6 +7,8 @@ const state = {
     wsReconnectTimer: null,
     wsReconnectAttempts: 0,
     isStreaming: false,
+    chunkCounter: 0,
+    audioArrivalLogged: false,
 
     // Settings
     currentSettings: {

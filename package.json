@@ -5,9 +5,10 @@
   "main": "main.js",
   "scripts": {
     "start": "electron-forge start",
-    "dev": "concurrently \"npm run start:renderer\" \"wait-on tcp:5173 && electron-forge start\"",
+    "dev": "npm run kill-ports && concurrently \"npm run start:renderer\" \"wait-on tcp:5173 && electron-forge start\"",
     "electron:dev": "npm run dev",
-    "start:renderer": "npm run dev --prefix renderer",
+    "start:renderer": "cd renderer && npm run dev",
+    "kill-ports": "powershell -Command \"$p1 = Get-NetTCPConnection -LocalPort 5173 -ErrorAction SilentlyContinue; if($p1){$p1 | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }}; $p2 = Get-NetTCPConnection -LocalPort 5174 -ErrorAction SilentlyContinue; if($p2){$p2 | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }}; Get-Process | Where-Object { $_.ProcessName -like '*Electron*' } | Stop-Process -Force -ErrorAction SilentlyContinue; exit 0\"",
     "build:renderer": "cd renderer && npm run build",
     "build:dev": "cd renderer && npm run build",
     "doctor": "powershell -ExecutionPolicy Bypass -File ./scripts/doctor.ps1",

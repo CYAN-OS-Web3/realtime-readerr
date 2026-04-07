@@ -13,8 +13,8 @@ const piperCache = new PiperCache(2); // Keep max 2 models in memory
 const config = require('./config');
 const { state, resetSTTState, updateSettings, getSettings } = require('./state-manager');
 
-// Manual dev detection to avoid ESM require issues
-const isDev = config.IS_DEV || !app.isPackaged;
+// FORCED DEV MODE FOR DIAGNOSTICS
+const isDev = true; 
 
 const defaultUserData = app.getPath('userData');
 const customUserData = path.join(defaultUserData, 'CyanDev');
@@ -328,72 +328,98 @@ function httpsJsonPost(urlStr, payload) {
 async function callElevenLabsTTSService(text, targetLang) {
     const userId = getInstallId();
     const languageCode = normalizeLang(targetLang);
-    try {
-        // Use speak-stream for lower latency (MP3 streaming)
-        const u = new URL(`${config.BACKEND_URL}/api/v1/tts/speak-stream`);
-        const body = JSON.stringify({ 
-            user_id: userId, 
-            device_id: userId, 
-            text, 
-            language: languageCode, 
-            gender: 'female', 
-            tts_engine: 'elevenlabs' 
-        });
-        const req = https.request({
-            hostname: u.hostname,
-            port: u.port ? Number(u.port) : 443,
-            path: u.pathname + (u.search || ''),
-            method: 'POST',
-            headers: {
+    const token = state.currentSettings?.token || '';
+    
+    return new Promise((resolve, reject) => {
+        try {
+            // Use speak-stream for lower latency (MP3 streaming)
+            const u = new URL(`${config.BACKEND_URL}/api/v1/tts/speak-stream`);
+            const body = JSON.stringify({ 
+                user_id: userId, 
+                device_id: userId, 
+                text, 
+                language: languageCode, 
+                gender: 'female', 
+                tts_engine: 'elevenlabs' 
+            });
+
+            const headers = {
                 'Content-Type': 'application/json',
                 'Content-Length': Buffer.byteLength(body)
+            };
+
+            if (token) {
+                headers['Authorization'] = `Bearer ${token}`;
             }
-        }, (res) => {
-            let pending = Buffer.alloc(0);
-            const status = res.statusCode || 0;
-            if (status !== 200) {
-                const err = [];
-                res.on('data', (c) => err.push(c));
-                res.on('end', () => {
-                    const txt = Buffer.concat(err).toString('utf8');
-                    sendToRenderer('log-message', `Backend ElevenLabs stream lỗi (HTTP ${status}): ${txt}`, 'error');
-                });
-                return;
-            }
-            
-            // Handle streaming JSON lines
-            let buffer = '';
-            res.on('data', (c) => {
-                buffer += c.toString();
-                const lines = buffer.split('\n');
-                buffer = lines.pop() || '';
+
+            const req = https.request({
+                hostname: u.hostname,
+                port: u.port ? Number(u.port) : 443,
+                path: u.pathname + (u.search || ''),
+                method: 'POST',
+                headers: headers,
+                timeout: 30000 
+            }, (res) => {
+                const status = res.statusCode || 0;
                 
-                for (const line of lines) {
-                    if (line.trim()) {
-                        try {
-                            const data = JSON.parse(line);
-                            if (data.audio) {
-                                const audioBuffer = Buffer.from(data.audio, 'base64');
-                                sendToRenderer('tts-audio-chunk', new Uint8Array(audioBuffer));
+                if (status === 401 || status === 403) {
+                    sendToRenderer('log-message', `Phiên làm việc hết hạn (401). Vui lòng đăng nhập lại ứng dụng Cyan để tiếp tục.`, 'error');
+                    resolve(); // Resolve to unblock queue but don't play
+                    return;
+                }
+
+                if (status !== 200) {
+                    const err = [];
+                    res.on('data', (c) => err.push(c));
+                    res.on('end', () => {
+                        const txt = Buffer.concat(err).toString('utf8');
+                        sendToRenderer('log-message', `Backend ElevenLabs stream lỗi (HTTP ${status}): ${txt}`, 'error');
+                        resolve();
+                    });
+                    return;
+                }
+                
+                // Handle streaming JSON lines
+                let buffer = '';
+                res.on('data', (c) => {
+                    buffer += c.toString();
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() || '';
+                    
+                    for (const line of lines) {
+                        if (line.trim()) {
+                            try {
+                                const data = JSON.parse(line);
+                                if (data.audio) {
+                                    const audioBuffer = Buffer.from(data.audio, 'base64');
+                                    sendToRenderer('tts-audio-chunk', new Uint8Array(audioBuffer));
+                                }
+                            } catch (e) {
+                                // Ignore malformed JSON lines
                             }
-                        } catch (e) {
-                            // Ignore malformed JSON lines
                         }
                     }
-                }
+                });
+                
+                res.on('end', () => {
+                    sendToRenderer('tts-audio-done');
+                    sendToRenderer('log-message', `ElevenLabs TTS streaming: Phát thành công (${languageCode}).`, 'success');
+                    resolve();
+                });
+            });
+
+            req.on('error', (e) => {
+                sendToRenderer('log-message', `Lỗi gọi Backend ElevenLabs stream: ${e.message}`, 'error');
+                resolve(); // Resolve to allow next queue item
             });
             
-            res.on('end', () => {
-                sendToRenderer('tts-audio-done');
-                sendToRenderer('log-message', `ElevenLabs TTS streaming: Phát thành công (${languageCode}).`, 'success');
-            });
-        });
-        req.on('error', (e) => sendToRenderer('log-message', `Lỗi gọi Backend ElevenLabs stream: ${e.message}`, 'error'));
-        req.write(body);
-        req.end();
-    } catch (e) {
-        sendToRenderer('log-message', `Lỗi gọi Backend ElevenLabs TTS: ${e && e.message ? e.message : 'unknown'}`, 'error');
-    }
+            req.write(body);
+            req.end();
+        } catch (e) {
+            sendToRenderer('log-message', `Lỗi gọi Backend ElevenLabs TTS: ${e && e.message ? e.message : 'unknown'}`, 'error');
+            resolve();
+        }
+    });
 }
 
 async function callAzureTTSService(text, targetLang) {
@@ -468,25 +494,38 @@ function splitIntoSegments(text){
 async function streamWaveNetOnce(text, targetLang, sendDone){
     try {
         const languageCode = normalizeLang(targetLang);
+        const token = state.currentSettings?.token || '';
         
         console.log(`🔊 Calling Backend TTS API: "${text}" -> ${languageCode}`);
         
+        const headers = {
+            'Content-Type': 'application/json'
+        };
+
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+        }
+
         const response = await fetch(`${config.BACKEND_URL}/api/v1/tts/speak-stream`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            signal: AbortSignal.timeout(30000),
+            headers: headers,
             body: JSON.stringify({
                 text: text,
                 language: languageCode,
                 gender: 'female',
                 user_id: getInstallId(),
                 device_id: getInstallId(),
-                tts_engine: 'google'
+                tts_engine: 'google',
+                sample_rate_hertz: 16000
             })
         });
 
         if (!response.ok) {
+            if (response.status === 401 || response.status === 403) {
+                sendToRenderer('log-message', `Phiên làm việc hết hạn (401). Vui lòng đăng nhập lại ứng dụng Cyan để tiếp tục.`, 'error');
+                return;
+            }
             throw new Error(`Backend TTS stream error: ${response.status}`);
         }
 
@@ -563,6 +602,7 @@ async function translateAndSpeak(text, targetLang, ttsEngine, preTranslatedText 
             try {
                 const resp = await fetch(`https://translation.googleapis.com/language/translate/v2?key=${GOOGLE_TRANSLATE_API_KEY}`, {
                     method: 'POST',
+                    signal: AbortSignal.timeout(10000), // 10s for translation
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ q: text, target: normalizedTag, format: 'text' })
                 });
@@ -734,15 +774,70 @@ function initWebSocketSTT(sourceLangCode, targetLangCode, sampleRate, token) {
 
     state.wsSTT.on('message', (data) => {
         try {
-            const msg = JSON.parse(data.toString());
-            if (msg.type === 'stt_result') {
-                handleSTTData(msg.payload || msg); // Backend nests in payload
-            } else if (msg.type === 'error') {
-                console.error('[STT] WebSocket Error from Server:', msg.message);
-                sendToRenderer('log-message', `Lỗi STT Server: ${msg.message}`, 'error');
+            const messageString = data.toString();
+            const response = JSON.parse(messageString);
+            
+            // Check for STT results
+            if (response.type === 'stt_result') {
+                const payload = response.payload || response.data || {};
+                const transcript = payload.transcript || payload.text || '';
+                const translation = payload.translation || payload.translated_text || '';
+                const isFinal = (payload.isFinal !== undefined) ? payload.isFinal : (payload.is_final || false);
+                
+                if (transcript) {
+                    console.log(`[STT WS] Transcript: "${transcript}" (${isFinal ? 'Final' : 'Partial'})`);
+                    
+                    // Renderer expects 'stt-transcript' NOT 'stt-result'
+                    sendToRenderer('stt-transcript', { transcript, isFinal });
+
+                    // Update UI translation feed if translation is present (even for partials)
+                    if (translation) {
+                        sendToRenderer('translation:update', { 
+                            sourceText: transcript, 
+                            translatedText: translation 
+                        });
+                    }
+
+                    // Xử lý TTS khi có kết quả FINAL
+                    if (isFinal && !state.isRecreatingStream) {
+                        const engine = state.currentSettings.ttsEngine;
+                        const targetLang = state.currentSettings.targetLang;
+
+                        if (translation) {
+                            console.log(`[STT WS] Translation final: "${translation}"`);
+                            sendToRenderer('log-message', `Nhận được bản dịch từ backend: ${transcript} -> ${translation}`, 'success');
+                            
+                            // Trigger TTS with pre-translated text
+                            enqueueTts(transcript, targetLang, engine, translation);
+                        } else {
+                            // Fallback if no translation returned - local translate will be triggered
+                            console.log(`[STT WS] Final transcript received (no translation): "${transcript}"`);
+                            enqueueTts(transcript, targetLang, engine);
+                        }
+                    }
+                }
+            } else if (response.type === 'error') {
+                const payload = response.payload || response.data || {};
+                const errorMsg = payload.message || response.message || response.error || response.err || "Unknown server error";
+                console.error('[STT WS] Server Error:', errorMsg);
+                console.dir(response, { depth: null }); // Detailed log
+                sendToRenderer('log-message', `Lỗi STT Server: ${errorMsg}`, 'error');
+            } else {
+                // Log other message types for debugging
+                console.log(`[STT WS] Received message: ${response.type || 'undefined-type'}`, response);
+                if (response.event === 'error') { // Backend sometimes uses 'event'
+                    const errorMsg = response.message || "Unauthorized or unknown error";
+                    console.error('[STT WS] Connection/Auth Error:', errorMsg);
+                    sendToRenderer('log-message', `Lỗi kết nối/authen: ${errorMsg}`, 'error');
+                }
             }
-        } catch (e) {
-            console.error('[STT] Failed to parse WS message:', e);
+        } catch (err) {
+            console.error('[STT WS] Error parsing message:', err);
+            const raw = data.toString();
+            if (raw.length > 0) {
+                console.log('[STT WS] Raw non-JSON response:', raw);
+                sendToRenderer('log-message', `Server response (non-JSON): ${raw.substring(0, 50)}...`, 'warning');
+            }
         }
     });
 
@@ -926,6 +1021,14 @@ ipcMain.on('audio-chunk', (event, chunk) => {
             // Send to WebSocket ONLY — no HTTP fallback to avoid 500 spam during reconnect
             if (state.wsSTT && state.wsSTT.readyState === WebSocket.OPEN) {
                 state.wsSTT.send(buf);
+                state.chunkCounter++;
+                
+                // Log progress every 100 chunks (~5-10 seconds of audio)
+                if (state.chunkCounter % 100 === 0) {
+                    console.log(`[STT WS] Sent ${state.chunkCounter} chunks (${buf.length} bytes each)`);
+                }
+            } else if (state.wsSTT && state.wsSTT.readyState === WebSocket.CONNECTING) {
+                // Silently drop or queue? Dropping for now to avoid congestion
             }
             // Chunk is silently dropped while WS is reconnecting
         }
@@ -941,11 +1044,13 @@ ipcMain.on('translation:toggle', (event, data) => {
     try {
         const { isTranslating, sourceLang, targetLang, ttsEngine, sensitivity, sampleRate, token } = data;
         if (isTranslating) {
+            state.chunkCounter = 0;
+            state.audioArrivalLogged = false;
             updateSettings({
                 sourceLang,
                 targetLang,
                 ttsEngine,
-                sensitivity: sensitivity || 50,
+                sensitivity: sensitivity || 15,
                 sampleRate: sampleRate || 16000,
                 token: token || ''
             });
@@ -1043,7 +1148,7 @@ function createWindow() {
         height: 800,
         minWidth: 1000,
         minHeight: 700,
-        backgroundColor: '#1a202c',
+        backgroundColor: '#01060a',
         show: false,
         webPreferences: {
             nodeIntegration: false,
@@ -1061,20 +1166,20 @@ function createWindow() {
     // Check environment variable for port or default to 5173
     // Use 5421 as a secondary fallback if Vite switched ports
     const port = process.env.PORT || 5173;
-    const startUrl = config.IS_DEV
+    const startUrl = isDev
         ? `http://localhost:${port}`
         : `file://${path.join(__dirname, 'renderer/dist/index.html')}`;
 
-    console.log(`[MAIN] Loading UI from: ${startUrl} (Dev Mode: ${config.IS_DEV})`);
+    console.log(`[MAIN] Loading UI from: ${startUrl} (Dev Mode: ${isDev})`);
     mainWindow.loadURL(startUrl).catch(async (err) => {
-        if (config.IS_DEV && port === 5173) {
+        if (isDev && port === 5173) {
             console.warn('[MAIN] Port 5173 failed, trying secondary 5421...');
             return mainWindow.loadURL('http://localhost:5421');
         }
         throw err;
     });
 
-    if (config.IS_DEV) {
+    if (isDev) {
         mainWindow.webContents.openDevTools({ mode: 'detach' });
     }
     mainWindow.webContents.on('did-finish-load', () => {
@@ -1166,40 +1271,46 @@ let healthCheckInterval = null;
 function startHealthCheck() {
     if (healthCheckInterval) clearInterval(healthCheckInterval);
     
-    healthCheckInterval = setInterval(async () => {
+    const performCheck = async () => {
         try {
             const startTime = Date.now();
-            const response = await fetch(`${config.BACKEND_URL}/health`);
-            const status = response.ok ? 'OK' : 'ERROR';
+            const response = await fetch(`${config.BACKEND_URL}/health`, {
+                signal: AbortSignal.timeout(5000)
+            });
             const latency = Date.now() - startTime;
             
-            // Only log when status changes
-            const currentStatus = `${status} (${response.status})`;
+            const currentStatus = response.ok ? `OK (${response.status})` : `ERROR (${response.status})`;
             if (currentStatus !== lastHealthStatus) {
                 console.log(`[Health Check] Backend status: ${currentStatus}, Latency: ${latency}ms`);
                 lastHealthStatus = currentStatus;
             }
             
-            sendToRenderer('server-status', { 
+            sendToRenderer('server:status', { 
                 connected: response.ok, 
                 latency: latency 
             });
         } catch (error) {
             const currentStatus = `ERROR: ${error.message}`;
             if (currentStatus !== lastHealthStatus) {
-                console.log('[Health Check] Backend error:', error.message);
+                console.log('[Health Check] Backend connection failed:', error.message);
                 lastHealthStatus = currentStatus;
             }
-            sendToRenderer('server-status', { 
+            sendToRenderer('server:status', { 
                 connected: false, 
                 error: error.message 
             });
         }
-    }, 60000); // Check every 60 seconds (reduced noise)
+    };
+
+    // Perform check immediately
+    performCheck();
+
+    // Then repeat every 10 seconds
+    healthCheckInterval = setInterval(performCheck, 10000); 
 }
 
 // Start health check after app is ready
-setTimeout(startHealthCheck, 2000);
+setTimeout(startHealthCheck, 500);
 
 app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') {
