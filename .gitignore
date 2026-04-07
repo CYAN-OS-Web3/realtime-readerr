@@ -1,5 +1,7 @@
 node_modules
 .env
+.env.*
+!.env.example
 dist
 renderer/dist
 renderer/node_modules

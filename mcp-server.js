@@ -70,7 +70,7 @@ class CyanSDKMCPServer {
               baseUrl: {
                 type: 'string',
                 description: 'Base URL of the API',
-                default: 'https://translator-backend-pi.vercel.app',
+                default: 'https://translator-gateway.fly.dev',
               },
             },
             required: ['text', 'userId'],
@@ -106,7 +106,7 @@ class CyanSDKMCPServer {
               baseUrl: {
                 type: 'string',
                 description: 'Base URL of the API',
-                default: 'https://translator-backend-pi.vercel.app',
+                default: 'https://translator-gateway.fly.dev',
               },
             },
             required: ['text', 'userId', 'audioFile'],
@@ -129,7 +129,7 @@ class CyanSDKMCPServer {
               baseUrl: {
                 type: 'string',
                 description: 'Base URL of the API',
-                default: 'https://translator-backend-pi.vercel.app',
+                default: 'https://translator-gateway.fly.dev',
               },
             },
             required: ['userId'],
@@ -152,7 +152,7 @@ class CyanSDKMCPServer {
               baseUrl: {
                 type: 'string',
                 description: 'Base URL of the API',
-                default: 'https://translator-backend-pi.vercel.app',
+                default: 'https://translator-gateway.fly.dev',
               },
             },
             required: ['userId'],
@@ -190,7 +190,7 @@ class CyanSDKMCPServer {
   }
 
   async handleSpeak(args) {
-    const { text, userId, language = 'en-US', gender = 'female', apiKey, baseUrl = 'https://translator-backend-pi.vercel.app' } = args;
+    const { text, userId, language = 'en-US', gender = 'female', apiKey, baseUrl = 'https://translator-gateway.fly.dev' } = args;
     
     const response = await fetch(`${baseUrl}/api/tts/speak`, {
       method: 'POST',
@@ -224,7 +224,7 @@ class CyanSDKMCPServer {
   }
 
   async handleCloneAndSpeak(args) {
-    const { text, userId, audioFile, quality = 'high', apiKey, baseUrl = 'https://translator-backend-pi.vercel.app' } = args;
+    const { text, userId, audioFile, quality = 'high', apiKey, baseUrl = 'https://translator-gateway.fly.dev' } = args;
     
     // For file handling, we'd need to read the file and create FormData
     // This is a simplified version
@@ -268,7 +268,7 @@ class CyanSDKMCPServer {
   }
 
   async handleCheckQuota(args) {
-    const { userId, apiKey, baseUrl = 'https://translator-backend-pi.vercel.app' } = args;
+    const { userId, apiKey, baseUrl = 'https://translator-gateway.fly.dev' } = args;
     
     const response = await fetch(`${baseUrl}/api/user/quota?user_id=${encodeURIComponent(userId)}`, {
       headers: {
@@ -293,7 +293,7 @@ class CyanSDKMCPServer {
   }
 
   async handleGetUserPlan(args) {
-    const { userId, apiKey, baseUrl = 'https://translator-backend-pi.vercel.app' } = args;
+    const { userId, apiKey, baseUrl = 'https://translator-gateway.fly.dev' } = args;
     
     const response = await fetch(`${baseUrl}/api/user/plan?user_id=${encodeURIComponent(userId)}`, {
       headers: {

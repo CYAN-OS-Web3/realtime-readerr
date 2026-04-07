@@ -36,7 +36,7 @@ import { Wifi, WifiOff, Globe, Mic, Settings, Minimize2, X, Check, ChevronRight,
     return buf.buffer; // Returns ArrayBuffer
   };
 
-  const STT_TARGET_SAMPLE_RATE = 48000;
+  const STT_TARGET_SAMPLE_RATE = 16000;
 
 const ControlHub = () => {
   // UI State
@@ -117,17 +117,33 @@ const ControlHub = () => {
   const [authUserId, setAuthUserId] = useState('');
 
   useEffect(() => {
-    // Listener: Deep Link Auth Sync
-    const cleanupAuth = window.electronAPI?.onAuthSync?.((data) => {
-      if (data && data.userId) {
-        setAuthUserId(data.userId);
-        setInstallId(data.userId);
-        localStorage.setItem('installId', data.userId);
-      }
-    });
-    return () => {
-      if(cleanupAuth) cleanupAuth();
-    };
+    // Check for userId in URL (Web Mode fallback)
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlUserId = urlParams.get('userId');
+    if (urlUserId) {
+      console.log('[App] Auth: Found userId in URL:', urlUserId);
+      setAuthUserId(urlUserId);
+      setInstallId(urlUserId);
+      localStorage.setItem('installId', urlUserId);
+      // Clean up URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+
+    // Listener: Deep Link Auth Sync (Electron Mode)
+    if (window.electronAPI?.onAuthSync) {
+      console.log('[App] Auth: Registering onAuthSync listener');
+      const cleanupAuth = window.electronAPI.onAuthSync((data) => {
+        if (data && data.userId) {
+          console.log('[App] Auth: Received auth-sync from Main Process:', data.userId);
+          setAuthUserId(data.userId);
+          setInstallId(data.userId);
+          localStorage.setItem('installId', data.userId);
+        }
+      });
+      return () => {
+        if(cleanupAuth) cleanupAuth();
+      };
+    }
   }, []);
 
   // ================================
@@ -238,7 +254,8 @@ const ControlHub = () => {
     }
 
     const initWebMode = () => {
-      const storedBackend = (localStorage.getItem('backendUrl') || 'https://translator-backend-pi.vercel.app').toString().trim()
+      console.log('[App] Initializing in Web Mode (No Electron detected)');
+      const storedBackend = (localStorage.getItem('backendUrl') || 'https://translator-gateway.fly.dev').toString().trim().replace(/\/$/, '')
       setBackendUrl(storedBackend)
       let id = (localStorage.getItem('installId') || '').toString().trim()
       if (!id) {
@@ -255,12 +272,16 @@ const ControlHub = () => {
       restoreVoiceOrder()
 
       const start = performance.now()
-      fetch(`${storedBackend}/api/health`, { method: 'GET' })
+      // Fix: Use /health instead of /api/health
+      fetch(`${storedBackend}/health`, { method: 'GET' })
         .then(r => {
           setIsConnected(Boolean(r && r.ok))
           setLatency(Math.round(performance.now() - start))
         })
-        .catch(() => setIsConnected(false))
+        .catch((err) => {
+          console.error('[App] Health check failed in Web Mode:', err);
+          setIsConnected(false);
+        })
     }
 
     const hasElectron = Boolean(window.electronAPI && typeof window.electronAPI.onServerStatus === 'function')
@@ -481,6 +502,10 @@ const ControlHub = () => {
     window.addEventListener('beforeunload', onBeforeUnload);
     return () => {
         window.removeEventListener('beforeunload', onBeforeUnload);
+        
+        // Stop microphone and clean up nodes
+        stopMicrophone();
+        
         cleanupServerStatus();
         cleanupTranslation();
         cleanupSTT();
@@ -490,12 +515,18 @@ const ControlHub = () => {
         if (cleanupChunkLocal) cleanupChunkLocal();
         cleanupDone();
         if (cleanupDoneLocal) cleanupDoneLocal();
+        
         if (ttsPlaybackCtxRef.current) {
             try { ttsPlaybackCtxRef.current.close(); } catch {}
             ttsPlaybackCtxRef.current = null;
             ttsLastScheduledRef.current = 0;
             ttsOutputDestRef.current = null;
             keepAliveAudioRef.current = null;
+        }
+        
+        if (audioContextRef.current && audioContextRef.current !== ttsPlaybackCtxRef.current) {
+            try { audioContextRef.current.close(); } catch {}
+            audioContextRef.current = null;
         }
     };
   }, []);
@@ -761,11 +792,8 @@ const ControlHub = () => {
             
             // SIMPLIFIED: Skip noise gate when noise reduction is OFF
             if (noiseReduction) {
-                // LOG DEBUG: Enhanced logging for noise cancellation
-                if (!window.lastLogTime || Date.now() - window.lastLogTime > 1000) {
-                     window.lastLogTime = Date.now();
-                     console.log(`[Mic] Vol: ${vol} | Ambient: ${currentAmbient.toFixed(1)} | Threshold: ${effectiveThreshold.toFixed(1)} | Gate: ${vol > effectiveThreshold ? 'OPEN' : 'CLOSED'} | Mode: ${noiseGateMode}`);
-                }
+                 // Optimization: Silenced log for performance
+                 // if (!window.lastLogTime || Date.now() - window.lastLogTime > 1000) { ... }
             }
 
             // ALWAYS send audio when noise reduction is OFF, hoặc khi vượt 30% ngưỡng để tránh kẹt
@@ -840,6 +868,7 @@ const ControlHub = () => {
     } catch (err) {
         console.error("Error accessing microphone:", err);
         alert(`Could not access microphone: ${err.message}. Please check system permissions.`);
+        throw err;
     }
   };
 
@@ -956,46 +985,49 @@ const ControlHub = () => {
   // ==========================================
   const handleStartTranslation = async () => {
     const newState = !isTranslating;
-    setIsTranslating(newState);
 
     if (newState) {
-        // Start
-        await startMicrophone();
-        if (ttsPlaybackCtxRef.current) {
-            try { await ttsPlaybackCtxRef.current.resume(); } catch {}
-        }
-        
-        // Map targetLang to short code if needed
-        const targetShort = targetLang.split('-')[0];
-        
-        const captureSampleRate = audioContextRef.current?.sampleRate || 48000;
-        const currentSampleRate = STT_TARGET_SAMPLE_RATE;
-        console.log(`[App] Starting translation. Capture: ${captureSampleRate}Hz, STT: ${currentSampleRate}Hz`);
+        try {
+            // Start
+            await startMicrophone();
+            if (ttsPlaybackCtxRef.current) {
+                try { await ttsPlaybackCtxRef.current.resume(); } catch {}
+            }
+            
+            // Map targetLang to short code if needed
+            const targetShort = targetLang.split('-')[0];
+            
+            const captureSampleRate = audioContextRef.current?.sampleRate || 48000;
+            const currentSampleRate = STT_TARGET_SAMPLE_RATE || 16000;
+            console.log(`[App] Starting translation. Capture: ${captureSampleRate}Hz, STT: ${currentSampleRate}Hz`);
 
-        if (window.electronAPI) {
-            window.electronAPI.toggleTranslation({
-                isTranslating: true,
-                sourceLang: sourceLang, // e.g. 'en-US'
-                targetLang: targetShort, // e.g. 'vi'
-                ttsEngine: ttsEngine,
-                sensitivity: sensitivity,
-                sampleRate: currentSampleRate // Send sample rate to main process
-            });
+            if (window.electronAPI) {
+                window.electronAPI.toggleTranslation({ 
+                    isTranslating: true, 
+                    sourceLang: sourceLang,
+                    targetLang: targetShort,
+                    ttsEngine: ttsEngine,
+                    sensitivity: sensitivity,
+                    sampleRate: currentSampleRate,
+                    token: localStorage.getItem('cyan_token') || ''
+                });
+                window.electronAPI.showOverlay();
+            }
+            setShowOverlay(true);
+            setIsTranslating(true);
+        } catch (err) {
+            console.error("Failed to start translation:", err);
+            setIsTranslating(false);
         }
-        
-        // Show overlay
-        setShowOverlay(true);
-        if (window.electronAPI) {
-            window.electronAPI.showOverlay();
-        } 
     } else {
         // Stop
         stopMicrophone();
-        setShowOverlay(false);
         if (window.electronAPI) {
             window.electronAPI.toggleTranslation({ isTranslating: false });
             window.electronAPI.hideOverlay();
         }
+        setShowOverlay(false);
+        setIsTranslating(false);
     }
   };
 
@@ -1056,13 +1088,21 @@ const ControlHub = () => {
                 onClick={(e) => {
                   if (e.altKey) {
                     const manualId = '102870395312994795443'
+                    console.log('[App] Auth: Using Dev Login Shortcut:', manualId);
                     setAuthUserId(manualId)
                     setInstallId(manualId)
                     localStorage.setItem('installId', manualId)
                     return
                   }
 
-                  window.electronAPI?.openExternal?.('https://cyan-os-landingpage.vercel.app/login?autoOpenApp=1')
+                  const loginUrl = 'https://cyan-os-landingpage.vercel.app/login?autoOpenApp=1';
+                  if (window.electronAPI?.openExternal) {
+                    console.log('[App] Auth: Opening Login in Electron Shell:', loginUrl);
+                    window.electronAPI.openExternal(loginUrl);
+                  } else {
+                    console.log('[App] Auth: No Electron detected, opening Login in Browser Tab:', loginUrl);
+                    window.open(loginUrl, '_blank');
+                  }
                 }}
                 className="flex items-center gap-1.5 px-2 py-1 bg-black/20 hover:bg-black/40 rounded-full transition-all text-xs text-white font-medium"
                 title="Login (Alt+Click for Dev)"
@@ -1509,11 +1549,11 @@ const ControlHub = () => {
           </div>
           
           <div className="space-y-3">
-             {previewText.map((item, idx) => (
-                <div key={idx} className="bg-gradient-to-r from-cyan-500/10 to-transparent border-l-2 border-cyan-500 pl-3 py-2">
-                    <p className="text-white text-sm leading-relaxed">{item.target}</p>
+             {previewText.length > 0 && (
+                <div className="bg-gradient-to-r from-cyan-500/10 to-transparent border-l-2 border-cyan-500 pl-3 py-2">
+                    <p className="text-white text-sm leading-relaxed">{previewText[0].target}</p>
                 </div>
-             ))}
+             )}
           </div>
 
           <div className="mt-3 pt-3 border-t border-gray-800 flex items-center justify-between">

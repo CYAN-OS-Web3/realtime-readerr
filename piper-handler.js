@@ -1,6 +1,7 @@
 const ort = require('onnxruntime-node');
 const fs = require('fs');
 const path = require('path');
+const logger = require('./utils/logger');
 
 class Piper {
     constructor(modelPath, configPath) {
@@ -11,10 +12,20 @@ class Piper {
     }
 
     async load() {
-        this.session = await ort.InferenceSession.create(this.modelPath);
-        this.config = JSON.parse(fs.readFileSync(this.configPath, 'utf8'));
-        console.log('Piper model loaded:', this.modelPath);
-        console.log('Piper config loaded:', this.config);
+        try {
+            this.session = await ort.InferenceSession.create(this.modelPath);
+            this.config = JSON.parse(fs.readFileSync(this.configPath, 'utf8'));
+            logger.info('Piper', `Model loaded: ${path.basename(this.modelPath)}`);
+        } catch (e) {
+            logger.error('Piper', `Failed to load model: ${this.modelPath}`, e);
+            throw e;
+        }
+    }
+
+    async dispose() {
+        this.session = null;
+        this.config = null;
+        logger.info('Piper', `Model disposed: ${path.basename(this.modelPath)}`);
     }
 
     async synthesize(text, options = {}) {
@@ -22,16 +33,10 @@ class Piper {
             throw new Error('Piper model not loaded. Call load() first.');
         }
 
-        // Simplified tokenization and phonemization (placeholders)
-        // In a real scenario, this would involve a robust tokenizer and phonemizer
-        // matching Piper's requirements. For now, we'll create dummy inputs.
         const inputIds = this.textToInputIds(text);
+        const inputTensor = new ort.Tensor('int64', new BigInt64Array(inputIds), [1, inputIds.length]);
+        const inputLengthsTensor = new ort.Tensor('int64', new BigInt64Array([BigInt(inputIds.length)]), [1]);
 
-        // Create ONNX compatible inputs
-        const inputTensor = new ort.Tensor('int64', BigInt64Array.from(inputIds), [1, inputIds.length]);
-        const inputLengthsTensor = new ort.Tensor('int64', BigInt64Array.from([inputIds.length]), [1]);
-
-        // Build scales tensor for Piper VITS model
         const lengthScale = options.lengthScale ?? 1.0;
         const noise = options.noise ?? 0.667;
         const noiseW = options.noiseW ?? 0.8;
@@ -43,40 +48,61 @@ class Piper {
             'scales': scalesTensor
         };
 
-        // The actual outputs depend on the Piper ONNX model.
-        // This is a simplified example based on common TTS ONNX models.
         const results = await this.session.run(feeds);
-        
-        // Assuming 'output' is the audio waveform tensor
-        const outputKey = Object.keys(results)[0] || 'output';
-        const audioSamples = results[outputKey].data; 
+        const output = results.output || Object.values(results)[0];
+        const audioSamples = output.data; 
 
         return { samples: new Float32Array(audioSamples) };
     }
 
     textToInputIds(text) {
-        // This is a placeholder for a real tokenizer.
-        // A proper Piper setup would have a `tokens.txt` and a phonemizer.
-        // For demonstration, we'll create a very basic mapping.
         const charToId = {};
-        let idCounter = 0;
-        for (const char of Object.keys(this.config.phoneme_id_map)) {
-            charToId[char] = this.config.phoneme_id_map[char];
+        if (this.config && this.config.phoneme_id_map) {
+            for (const char of Object.keys(this.config.phoneme_id_map)) {
+                charToId[char] = this.config.phoneme_id_map[char];
+            }
         }
 
         const inputIds = [];
         for (const char of text.toLowerCase()) {
             if (charToId[char] !== undefined) {
-                inputIds.push(charToId[char]);
+                inputIds.push(BigInt(charToId[char]));
             } else if (char === ' ') {
-                // Space character, often has a specific ID or is ignored
-                // Using ID 0 as a common placeholder for padding or space
-                inputIds.push(0);
+                inputIds.push(0n);
             }
-            // For any other characters, you might want to log a warning or use a default ID
         }
-        return inputIds.length > 0 ? inputIds : [0]; // Return at least one ID
+        return inputIds.length > 0 ? inputIds : [0n]; 
     }
 }
 
-module.exports = { Piper };
+class PiperCache {
+    constructor(maxSize = 2) {
+        this.cache = new Map();
+        this.maxSize = maxSize;
+    }
+
+    async getModel(modelPath, configPath) {
+        if (this.cache.has(modelPath)) {
+            const piper = this.cache.get(modelPath);
+            // Move to end (MRU)
+            this.cache.delete(modelPath);
+            this.cache.set(modelPath, piper);
+            return piper;
+        }
+
+        if (this.cache.size >= this.maxSize) {
+            const oldestKey = this.cache.keys().next().value;
+            const oldestPiper = this.cache.get(oldestKey);
+            await oldestPiper.dispose();
+            this.cache.delete(oldestKey);
+            logger.info('PiperCache', `Evicted model to free memory: ${path.basename(oldestKey)}`);
+        }
+
+        const piper = new Piper(modelPath, configPath);
+        await piper.load();
+        this.cache.set(modelPath, piper);
+        return piper;
+    }
+}
+
+module.exports = { Piper, PiperCache };

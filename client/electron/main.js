@@ -29,7 +29,7 @@ const sdk = require('microsoft-cognitiveservices-speech-sdk');
 
 process.env.GOOGLE_APPLICATION_CREDENTIALS = process.env.GOOGLE_APPLICATION_CREDENTIALS || '';
 
-const BACKEND_URL = (process.env.BACKEND_URL || 'https://translator-backend-pi.vercel.app').toString().trim();
+const BACKEND_URL = (process.env.BACKEND_URL || 'https://translator-gateway.fly.dev/').toString().trim();
 const CYAN_USER_ID = (process.env.CYAN_USER_ID || '').toString().trim();
 
 const projectId = process.env.GCP_PROJECT_ID || '';

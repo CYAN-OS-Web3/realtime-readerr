@@ -81,7 +81,7 @@ Generate speech using Cyan SDK
   "language": "en-US",
   "gender": "female",
   "apiKey": "your-api-key",
-  "baseUrl": "https://translator-backend-pi.vercel.app"
+  "baseUrl": "https://translator-gateway.fly.dev/"
 }
 ```
 

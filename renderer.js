@@ -261,6 +261,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- IPC LISTENERS (Từ main.js) ---
 
     // Nhận bản nháp và bản chính thức từ Google STT
+    window.electronAPI.on('stt-partial', (event, text) => {
+        if (typeof text !== 'string') return;
+        updateSttDisplay(text, false);
+    });
+
     ipcRenderer.on('stt-transcript', (event, data) => {
         if (!data.isFinal) {
             document.getElementById('source-text').textContent = data.transcript + '...';
@@ -283,11 +288,17 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     
     // Nhận Log Message
-    ipcRenderer.on('log-message', (event, message, type) => {
-        appendLog(message, type);
+    window.electronAPI.on('log-message', (event, message, type) => {
+        if (typeof message !== 'string') return;
+        addLog(message, type);
     });
 
     // Cập nhật trạng thái kết nối
+    window.electronAPI.on('server-status', (event, status) => {
+        if (!status || typeof status !== 'object') return;
+        updateStatus(status.connected, status.latency, status.error);
+    });
+
     ipcRenderer.on('update-connection-status', (event, status) => {
         const statusEl = document.getElementById('connection-status');
         statusEl.textContent = status;

@@ -1,42 +1,42 @@
 // main.js - Cấu hình Electron Forge và Xử lý Google STT/Translation Streaming
 
 const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const { Buffer } = require('buffer');
+const { validateIPC } = require('./validation/ipc-schema');
+const logger = require('./utils/logger');
 const fs = require('fs');
 const path = require('path');
 const url = require('url');
-const { Piper } = require('./piper-handler');
+const { Piper, PiperCache } = require('./piper-handler');
+const piperCache = new PiperCache(2); // Keep max 2 models in memory
+
+const config = require('./config');
+const { state, resetSTTState, updateSettings, getSettings } = require('./state-manager');
 
 // Manual dev detection to avoid ESM require issues
-const isDev = process.env.NODE_ENV === 'development' || process.argv.includes('--dev') || !app.isPackaged;
+const isDev = config.IS_DEV || !app.isPackaged;
 
 const defaultUserData = app.getPath('userData');
 const customUserData = path.join(defaultUserData, 'CyanDev');
 try {
   fs.mkdirSync(customUserData, { recursive: true });
-} catch {}
+} catch (e) {
+  logger.error('FileSystem', `Failed to create custom user data directory: ${customUserData}`, e);
+}
 
 // Local ONNX TTS (Piper) for instant snippet
-async function loadPiper(langCode){
+async function loadPiper(langCode) {
     const lc = (langCode || '').toLowerCase();
-    if (lc.startsWith('vi')){
-        if (!piperVi){
-            piperVi = new Piper(
-                path.join(__dirname, 'assets', 'models', 'vi_VN-vivos-x_low.onnx'),
-                path.join(__dirname, 'assets', 'models', 'vi_VN-vivos-x_low.onnx.json')
-            );
-            await piperVi.load();
-        }
-        return piperVi;
+    let modelName = 'en_US-lessac-medium.onnx';
+    
+    if (lc.startsWith('vi')) {
+        modelName = 'vi_VN-vivos-x_low.onnx';
     }
-    // default en
-    if (!piperEn){
-        piperEn = new Piper(
-            path.join(__dirname, 'assets', 'models', 'en_US-lessac-medium.onnx'),
-            path.join(__dirname, 'assets', 'models', 'en_US-lessac-medium.onnx.json')
-        );
-        await piperEn.load();
-    }
-    return piperEn;
+    
+    const modelPath = path.join(__dirname, 'assets', 'models', modelName);
+    const configPath = `${modelPath}.json`;
+    
+    return await piperCache.getModel(modelPath, configPath);
 }
 
 function resample22050To16000(int16){
@@ -55,19 +55,8 @@ function resample22050To16000(int16){
 }
 
 async function synthLocalSnippet(text, targetLang){
-    try{
-        const snippet = (text||'').split(/\s+/).slice(0,5).join(' ');
-        if (!snippet || snippet.length < MIN_TTS_CHARS) return;
-        const p = await loadPiper(targetLang);
-        if (!p) return;
-        const audio = await p.synthesize(snippet, { lengthScale: 1.0, noise: 0.667, noiseW: 0.8 });
-        const pcm16 = new Int16Array(audio.samples.buffer);
-        const pcm16k = resample22050To16000(pcm16);
-        sendToRenderer('tts-audio-chunk-local', new Uint8Array(pcm16k.buffer));
-        sendToRenderer('tts-audio-done-local');
-    }catch(e){
-        console.warn('synthLocalSnippet failed', e.message);
-    }
+    // Disabled to avoid 'strange' voice blending with high-quality backend voice
+    return;
 }
 app.setPath('userData', customUserData);
 app.commandLine.appendSwitch('disk-cache-dir', path.join(customUserData, 'Cache'));
@@ -107,14 +96,24 @@ if (!gotTheLock) {
 }
 
 function handleDeepLink(urlStr) {
+  console.log('[MAIN] Received Deep Link:', urlStr);
   try {
     const u = new URL(urlStr);
     const userId = u.searchParams.get('userId');
-    if (userId && mainWindow) {
-      mainWindow.webContents.send('auth-sync', { userId });
+    if (userId) {
+      console.log('[MAIN] Extracted userId from deep link:', userId);
+      config.CYAN_USER_ID = userId; 
+      if (mainWindow) {
+        mainWindow.webContents.send('auth-sync', { userId });
+        console.log('[MAIN] Sent auth-sync event to renderer');
+      } else {
+        console.warn('[MAIN] Deep link received but mainWindow is null');
+      }
+    } else {
+      console.warn('[MAIN] No userId found in deep link');
     }
   } catch (e) {
-    console.error('Deep link error:', e);
+    console.error('[MAIN] Deep link parsing error:', e);
   }
 }
 
@@ -126,72 +125,51 @@ const { TextToSpeechClient } = require('@google-cloud/text-to-speech');
 const https = require('https'); 
 const sdk = require('microsoft-cognitiveservices-speech-sdk'); 
 const fetch = require('node-fetch'); 
+const WebSocket = require('ws');
 
 // =====================================================================
-// !!! GOOGLE CREDENTIALS - NO LONGER NEEDED IN ELECTRON !!!
+// !!! CONFIGURATION & CONSTANTS !!!
 // =====================================================================
-// process.env.GOOGLE_APPLICATION_CREDENTIALS = process.env.GOOGLE_APPLICATION_CREDENTIALS || path.join(__dirname, 'google-credentials.json');
+const BACKEND_URL = config.BACKEND_URL;
+const MIN_TTS_CHARS = config.MIN_TTS_CHARS || 3;
+const TTS_DEBOUNCE_MS = 500;
+const MIN_TTS_GAP_MS = 50; // Reduced from 500 to 50 for ultra-fast flow
+
+// --- Helper: Normalize language codes ---
+function normalizeLang(lang) {
+    const v = String(lang || '').toLowerCase().trim();
+    if (!v) return 'vi-VN';
+    if (v === 'vi' || v === 'vn' || v === 'vi-vn') return 'vi-VN';
+    if (v === 'en' || v === 'us' || v === 'en-us') return 'en-US';
+    
+    // Default map for other common codes
+    const map = {
+        ja: 'ja-JP',
+        ko: 'ko-KR',
+        zh: 'zh-CN',
+        fr: 'fr-FR',
+        de: 'de-DE',
+        es: 'es-ES',
+        it: 'it-IT',
+        pt: 'pt-BR',
+        ru: 'ru-RU'
+    };
+    return map[v] || lang;
+}
+
+const GOOGLE_TRANSLATE_API_KEY = config.GOOGLE_TRANSLATE_API_KEY;
+const azureKey = config.AZURE_SPEECH_KEY;
+const azureRegion = config.AZURE_SPEECH_REGION;
 
 
-// =========================================================
-// 1. BẢO MẬT API KEYS (CHỈ TỒN TẠI TRONG MAIN PROCESS)
-// =========================================================
-// *********************************************************
-// THAY THẾ KEY VÀ VOICE ID THỰC TẾ CỦA BẠN VÀO ĐÂY
-// *********************************************************
-const BACKEND_URL = (process.env.BACKEND_URL || 'https://translator-backend-pi.vercel.app').toString().trim();
-const CYAN_USER_ID = (process.env.CYAN_USER_ID || '').toString().trim();
-const projectId = (process.env.GCP_PROJECT_ID || '').toString().trim();
 
-// --- AZURE TTS CREDENTIALS ---
-const azureKey = (process.env.AZURE_SPEECH_KEY || '').toString().trim();
-const azureRegion = (process.env.AZURE_SPEECH_REGION || '').toString().trim();
-
-// =========================================================
-// 2. CẤU HÌNH GIỚI TÍNH ƯU TIÊN CHO AZURE TTS
-// =========================================================
-const AZURE_PREFERRED_GENDER = 'male'; 
-
-// =========================================================
-// 3. KHỞI TẠO CLIENT VÀ BIẾN TOÀN CỤC
-// =========================================================
-// const speechClient = projectId ? new SpeechClient({ projectId: projectId }) : new SpeechClient(); // No longer needed
-const GOOGLE_TRANSLATE_API_KEY = (process.env.GOOGLE_TRANSLATE_API_KEY || process.env.TRANSLATE_API_KEY || '').trim();
-const ttsClient = new TextToSpeechClient(); 
-
-let recognizeStream = null;
 let mainWindow = null;
 let overlayWindow = null;
 let piperEn = null;
 let piperVi = null;
-const MIN_TTS_CHARS = 8;
-let currentSettings = {
-    sourceLang: 'en-US', 
-    targetLang: 'vi', 
-    ttsEngine: 'google',
-    sensitivity: 50
-};
-// TTS throttle state to avoid spamming provider (429)
-let lastTtsAt = 0;
-let ttsInFlight = false;
-let ttsPendingTimer = null;
-let ttsPendingText = '';
-const MIN_TTS_GAP_MS = 400; // shorter gap when using debounce queue
-const TTS_DEBOUNCE_MS = 400; // wait a short window to aggregate text
-let isStreaming = false;
-// STT partial aggregation for low-latency TTS without cutting too small
-let sttLastSentIdx = 0;
-let sttLastSendTs = 0;
-let lastPartialTranscript = '';
-let lastFinalTranscript = '';
-let didTranslateForUtterance = false;
-let sttFinalizing = false;
-let rendererAlive = false;
-let overlayAlive = false;
-let suppressRendererIpc = false;
 
 function getInstallId(){
-    return CYAN_USER_ID || `install-${app.getPath('userData').split(path.sep).pop()}`;
+    return config.CYAN_USER_ID || `install-${app.getPath('userData').split(path.sep).pop()}`;
 }
 
 // =========================================================
@@ -284,9 +262,9 @@ function getAzureVoiceName(targetLang) {
         'fil': 'fil-PH-BlessicaNeural'
     };
 
-    const selectedMap = (AZURE_PREFERRED_GENDER === 'male') ? maleVoiceMap : femaleVoiceMap;
+    const selectedMap = (config.AZURE_PREFERRED_GENDER === 'male') ? maleVoiceMap : femaleVoiceMap;
     
-    if (AZURE_PREFERRED_GENDER === 'male') {
+    if (config.AZURE_PREFERRED_GENDER === 'male') {
          return selectedMap[targetLang] || 'en-US-RyanNeural'; 
     } else {
          return selectedMap[targetLang] || 'en-US-AvaMultilingualNeural'; 
@@ -301,8 +279,8 @@ function getAzureVoiceName(targetLang) {
 function sendToRenderer(channel, data, type = 'info') {
     try {
         if (
-            rendererAlive &&
-            !suppressRendererIpc &&
+            state.rendererAlive &&
+            !state.suppressRendererIpc &&
             mainWindow &&
             !mainWindow.isDestroyed() &&
             mainWindow.webContents &&
@@ -311,28 +289,12 @@ function sendToRenderer(channel, data, type = 'info') {
         ) {
             mainWindow.webContents.send(channel, data, type);
         }
-    } catch (e) {}
+    } catch (e) {
+        logger.error('IPC', `Failed to send message to renderer on channel: ${channel}`, e);
+    }
 }
 
-function normalizeLang(code) {
-    const v = String(code || '').trim();
-    if (!v) return 'en-US';
-    if (v.includes('-')) return v;
-    const map = {
-        en: 'en-US',
-        vi: 'vi-VN',
-        ja: 'ja-JP',
-        ko: 'ko-KR',
-        zh: 'zh-CN',
-        fr: 'fr-FR',
-        de: 'de-DE',
-        es: 'es-ES',
-        it: 'it-IT',
-        pt: 'pt-BR',
-        ru: 'ru-RU'
-    };
-    return map[v] || 'en-US';
-}
+// normalizeLang consolidated at the top of file
 
 function httpsJsonPost(urlStr, payload) {
     return new Promise((resolve, reject) => {
@@ -368,7 +330,7 @@ async function callElevenLabsTTSService(text, targetLang) {
     const languageCode = normalizeLang(targetLang);
     try {
         // Use speak-stream for lower latency (MP3 streaming)
-        const u = new URL(`${BACKEND_URL}/api/tts/speak-stream`);
+        const u = new URL(`${config.BACKEND_URL}/api/v1/tts/speak-stream`);
         const body = JSON.stringify({ 
             user_id: userId, 
             device_id: userId, 
@@ -475,7 +437,9 @@ async function callAzureTTSService(text, targetLang) {
     } catch (e) {
         sendToRenderer('log-message', `Lỗi Azure TTS streaming: ${e.message}`, 'error');
     } finally {
-        try { synthesizer?.close(); } catch {}
+        try { synthesizer?.close(); } catch (e) {
+            logger.error('AzureTTS', 'Failed to close Azure synthesizer', e);
+        }
     }
 }
 
@@ -486,12 +450,14 @@ async function callGoogleWaveNetTTSService(text, targetLang) {
 function splitIntoSegments(text){
     const words = (text || '').trim().split(/\s+/).filter(Boolean);
     if (words.length === 0) return [];
-    if (words.length <= 8) return [text];
+    // Increase threshold to 50 words to avoid unnecessary chunking
+    if (words.length <= 50) return [text];
     const segments = [];
     let i = 0;
     while (i < words.length){
         const remain = words.length - i;
-        const sz = Math.min(Math.max(6, Math.min(8, remain)), remain);
+        // Chunk into 40-50 words
+        const sz = Math.min(Math.max(40, Math.min(50, remain)), remain);
         const chunkWords = words.slice(i, i + sz);
         segments.push(chunkWords.join(' '));
         i += sz;
@@ -501,22 +467,11 @@ function splitIntoSegments(text){
 
 async function streamWaveNetOnce(text, targetLang, sendDone){
     try {
-        const langCodeMap = {
-            'en': 'en-US', 'vi': 'vi-VN', 'es': 'es-ES', 'fr': 'fr-FR', 'de': 'de-DE',
-            'it': 'it-IT', 'pt': 'pt-PT', 'ru': 'ru-RU', 'ja': 'ja-JP', 'ko': 'ko-KR',
-            'zh': 'cmn-CN', 'hi': 'hi-IN', 'ar': 'ar-XA', 'bn': 'bn-IN', 'ms': 'ms-MY',
-            'id': 'id-ID', 'th': 'th-TH', 'tr': 'tr-TR', 'pl': 'pl-PL', 'uk': 'uk-UA',
-            'nl': 'nl-NL', 'sv': 'sv-SE', 'fi': 'fi-FI', 'da': 'da-DK', 'no': 'nb-NO',
-            'cs': 'cs-CZ', 'el': 'el-GR', 'he': 'he-IL', 'ro': 'ro-RO', 'hu': 'hu-HU',
-            'sk': 'sk-SK', 'bg': 'bg-BG', 'ca': 'ca-ES', 'hr': 'hr-HR', 'sr': 'sr-RS',
-            'sl': 'sl-SI', 'et': 'et-EE', 'lv': 'lv-LV', 'lt': 'lt-LT', 'fil': 'fil-PH'
-        };
-
-        const languageCode = langCodeMap[targetLang] || 'en-US';
+        const languageCode = normalizeLang(targetLang);
         
         console.log(`🔊 Calling Backend TTS API: "${text}" -> ${languageCode}`);
         
-        const response = await fetch(`${BACKEND_URL}/api/tts/speak-stream`, {
+        const response = await fetch(`${config.BACKEND_URL}/api/v1/tts/speak-stream`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -586,31 +541,48 @@ async function callGoogleWaveNetChunkedTTSService(text, targetLang){
 }
 // 6. XỬ LÝ DỊCH THUẬT VÀ TTS (GIỮ NGUYÊN)
 // =========================================================
-async function translateAndSpeak(text, targetLang, ttsEngine) {
+async function translateAndSpeak(text, targetLang, ttsEngine, preTranslatedText = null) {
     try {
-        console.log(`🔄 Starting translation: "${text}" -> ${targetLang}`);
+        console.log(`🔄 Starting translation/TTS flow for: "${text}" -> ${targetLang}`);
         
-        // Translate via REST API (API key)
-        let translatedText = text;
-        if (GOOGLE_TRANSLATE_API_KEY) {
+        // Helper to unescape HTML entities if they accidentally sneak in
+        const unescapeHtml = (str) => {
+            return str.replace(/&#([\d]+);/g, (match, dec) => String.fromCharCode(dec))
+                      .replace(/&quot;/g, '"').replace(/&amp;/g, '&')
+                      .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+                      .replace(/&apos;/g, "'");
+        };
+
+        let translatedText = preTranslatedText || text;
+        console.log(`[TTS] Input Text: "${text}", Pre-translated: "${preTranslatedText || 'none'}"`);
+        
+        // Only translate if not already translated by backend and key exists
+        if (!preTranslatedText && GOOGLE_TRANSLATE_API_KEY && text.length > 0) {
+            console.log(`📡 Local translation via Google REST API...`);
+            const normalizedTag = normalizeLang(targetLang).split('-')[0];
             try {
                 const resp = await fetch(`https://translation.googleapis.com/language/translate/v2?key=${GOOGLE_TRANSLATE_API_KEY}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ q: text, target: targetLang.split('-')[0] || targetLang })
+                    body: JSON.stringify({ q: text, target: normalizedTag, format: 'text' })
                 });
                 if (resp.ok) {
                     const data = await resp.json();
                     translatedText = data?.data?.translations?.[0]?.translatedText || text;
+                    // Force unescape just in case Google API ignores 'format: text' (it happens)
+                    translatedText = unescapeHtml(translatedText);
+                    console.log(`✅ Local translation complete: "${translatedText}"`);
                 } else {
                     console.error('Translate REST failed:', resp.status, await resp.text());
                 }
             } catch (e) {
                 console.error('Translate REST error:', e);
             }
+        } else if (preTranslatedText) {
+            translatedText = unescapeHtml(preTranslatedText);
+            console.log(`✅ Using pre-translated text from backend: "${translatedText}"`);
         }
 
-        console.log(`✅ Translation complete: "${translatedText}"`);
         sendToRenderer('translation:update', { 
             sourceText: text, 
             translatedText: translatedText 
@@ -622,24 +594,21 @@ async function translateAndSpeak(text, targetLang, ttsEngine) {
         });
 
         try {
-            if (overlayAlive && overlayWindow && !overlayWindow.isDestroyed() && overlayWindow.webContents && !overlayWindow.webContents.isDestroyed()) {
+            if (state.overlayAlive && overlayWindow && !overlayWindow.isDestroyed() && overlayWindow.webContents && !overlayWindow.webContents.isDestroyed()) {
                 overlayWindow.webContents.send('translation-result', translatedText);
             }
-        } catch (e) {}
+        } catch (e) {
+            logger.error('Overlay', 'Failed to send translation to overlay', e);
+        }
 
-        // Start TTS immediately after translation
+        // Start TTS immediately
         console.log(`🔊 Starting TTS with engine: ${ttsEngine}`);
         if (ttsEngine === 'elevenlabs') {
-            console.log(`🔊 Using ElevenLabs TTS engine`);
             await callElevenLabsTTSService(translatedText, targetLang);
         } else if (ttsEngine === 'azure') {
-            console.log(`🔊 Using Azure TTS engine`);
             await callAzureTTSService(translatedText, targetLang);
         } else if (ttsEngine === 'google') {
-            console.log(`🔊 Using Google TTS engine`);
             await callGoogleWaveNetTTSService(translatedText, targetLang);
-        } else {
-            console.log(`🔊 Unknown TTS engine: ${ttsEngine}`);
         }
 
     } catch (e) {
@@ -648,43 +617,57 @@ async function translateAndSpeak(text, targetLang, ttsEngine) {
     }
 }
 
-// Simple throttle to avoid spamming TTS provider (429)
-async function tryTranslateAndSpeak(text, targetLang, ttsEngine) {
-    const now = Date.now();
-    const trimmed = (text || '').trim();
-    if (trimmed.length < MIN_TTS_CHARS) {
-        console.log(`⏩ Skip TTS: text too short (${trimmed.length} chars)`);
-        return;
-    }
-    if (now - lastTtsAt < MIN_TTS_GAP_MS) {
-        console.log(`⏩ Skip TTS: gap too short (${now - lastTtsAt}ms < ${MIN_TTS_GAP_MS}ms)`);
-        return;
-    }
-    if (ttsInFlight) {
-        console.log('⏩ Skip TTS: another TTS in flight');
-        return;
-    }
-    lastTtsAt = now;
-    ttsInFlight = true;
+// Sequential Queue Processor for TTS
+async function processTtsQueue() {
+    if (state.ttsInFlight || state.ttsQueue.length === 0) return;
+    
+    state.ttsInFlight = true;
+    const item = state.ttsQueue.shift();
+    
     try {
-        await translateAndSpeak(trimmed, targetLang, ttsEngine);
+        console.log(`[QUEUE] Processing TTS: "${item.text.substring(0, 30)}..." (Queue left: ${state.ttsQueue.length})`);
+        await translateAndSpeak(item.text, item.targetLang, item.ttsEngine, item.preTranslatedText);
+        
+        // Wait a small gap between sentences
+        if (state.ttsQueue.length > 0) {
+            await new Promise(r => setTimeout(r, MIN_TTS_GAP_MS));
+        }
+    } catch (e) {
+        console.error('[QUEUE] TTS Error:', e);
     } finally {
-        ttsInFlight = false;
+        state.ttsInFlight = false;
+        // Schedule next item
+        setImmediate(processTtsQueue);
     }
 }
 
-function enqueueTts(text, targetLang, ttsEngine) {
+async function tryTranslateAndSpeak(text, targetLang, ttsEngine, preTranslatedText = null) {
     const trimmed = (text || '').trim();
-    if (trimmed.length < MIN_TTS_CHARS) {
-        console.log(`⏩ Skip enqueue: text too short (${trimmed.length} chars)`);
+    if (!trimmed) return;
+    
+    // Add to queue instead of skipping
+    state.ttsQueue.push({
+        text: trimmed,
+        targetLang: normalizeLang(targetLang),
+        ttsEngine,
+        preTranslatedText
+    });
+    
+    processTtsQueue();
+}
+
+function enqueueTts(text, targetLang, ttsEngine, preTranslatedText = null) {
+    const trimmed = (text || '').trim();
+    const charCount = trimmed.length;
+    
+    if (charCount < MIN_TTS_CHARS) {
+        console.log(`⏩ [TTS] Skipping enqueue: "${trimmed}" (Length: ${charCount} < MIN: ${MIN_TTS_CHARS})`);
         return;
     }
-    ttsPendingText = trimmed;
-    if (ttsPendingTimer) clearTimeout(ttsPendingTimer);
-    ttsPendingTimer = setTimeout(() => {
-        ttsPendingTimer = null;
-        tryTranslateAndSpeak(ttsPendingText, targetLang, ttsEngine);
-    }, TTS_DEBOUNCE_MS);
+    
+    console.log(`🔊 [TTS] Enqueueing for processing: "${trimmed}" (Engine: ${ttsEngine}, Target: ${targetLang})`);
+    // For "Final" results from STT, we trigger immediately (but it goes into our sequential queue)
+    tryTranslateAndSpeak(trimmed, targetLang, ttsEngine, preTranslatedText);
 }
 
 
@@ -692,8 +675,8 @@ function enqueueTts(text, targetLang, ttsEngine) {
 // 7. XỬ LÝ GOOGLE SPEECH-TO-TEXT STREAMING (GIỮ NGUYÊN)
 // =========================================================
 
-function startStream(sourceLangCode, sampleRate = 16000) { 
-    if (recognizeStream) {
+function startStream(sourceLangCode, sampleRate = 16000, token = '') { 
+    if (state.recognizeStream) {
         stopStream();
     }
 
@@ -705,37 +688,86 @@ function startStream(sourceLangCode, sampleRate = 16000) {
     sendToRenderer('log-message', `Chuẩn bị khởi tạo STT Stream. Code: ${sourceLangCode}, Rate: ${sampleRate}Hz`, 'info');
     sendToRenderer('log-message', `Khởi tạo Backend STT Stream cho ngôn ngữ: ${sourceLangCode}`, 'info');
 
-    // Create backend streaming connection
-    recognizeStream = {
-        write: (chunk) => {
-            // Send audio chunk to backend
-            sendAudioChunkToBackend(chunk, sourceLangCode, sampleRate);
-        },
-        end: () => {
-            // End streaming
-            endBackendStream();
-        },
-        on: (event, callback) => {
-            // Handle events
-            if (event === 'error') {
-                recognizeStream.errorCallback = callback;
-            } else if (event === 'data') {
-                recognizeStream.dataCallback = callback;
-            } else if (event === 'end') {
-                recognizeStream.endCallback = callback;
-            }
-        },
-        writable: true,
-        destroy: () => {
-            recognizeStream = null;
-        }
-    };
-
-    isStreaming = true;
-    sendToRenderer('log-message', 'STT Stream đã BẮT ĐẦU. Đang chờ âm thanh...', 'success');
+    // Backend and WebSocket state
+    state.isStreaming = true;
+    sendToRenderer('log-message', 'STT Stream đã BẮT ĐẦU (WebSocket Mode). Đang chờ âm thanh...', 'success');
     
+    // Initialize WebSocket connection
+    const targetLangCode = state.currentSettings.targetLang;
+    initWebSocketSTT(sourceLangCode, targetLangCode, sampleRate, token);
+
     // Schedule periodic recreation for long sessions
     scheduleStreamRecreation();
+}
+
+function initWebSocketSTT(sourceLangCode, targetLangCode, sampleRate, token) {
+    if (state.wsSTT) {
+        try { state.wsSTT.close(); } catch (e) {}
+    }
+
+    // Sanitize target language code (e.g. 'vn' -> 'vi', 'vi-VN' -> 'vi')
+    const sanitizedTargetLang = normalizeLang(targetLangCode);
+    
+    const tokenPart = token ? `&token=${token}` : '';
+    const url = `${config.BACKEND_URL.replace('http', 'ws')}/api/v1/stt?source_lang=${sourceLangCode}&target_lang=${sanitizedTargetLang}&sample_rate=${sampleRate}&user_id=${config.CYAN_USER_ID || 'guest'}${tokenPart}`;
+    
+    console.log(`[STT] Connecting to WebSocket: ${url.replace(token, 'REDACTED')}`);
+    console.log(`[STT] Handshake Params: source=${sourceLangCode}, target=${sanitizedTargetLang}, rate=${sampleRate}`);
+    state.wsSTT = new WebSocket(url);
+
+    state.wsSTT.on('open', () => {
+        console.log(`[STT] WebSocket Connected to ${config.BACKEND_URL}`);
+        state.wsReconnectAttempts = 0;
+        sendToRenderer('log-message', `WebSocket STT: Đã kết nối. Target: ${sanitizedTargetLang}`, 'success');
+        state.wsSTT.send(JSON.stringify({
+            type: 'stt_start',
+            payload: {
+                language: sourceLangCode,
+                lang: sourceLangCode,
+                target_language: sanitizedTargetLang,
+                target_lang: sanitizedTargetLang,
+                sample_rate: sampleRate,
+                sampleRate: sampleRate
+            }
+        }));
+    });
+
+    state.wsSTT.on('message', (data) => {
+        try {
+            const msg = JSON.parse(data.toString());
+            if (msg.type === 'stt_result') {
+                handleSTTData(msg.payload || msg); // Backend nests in payload
+            } else if (msg.type === 'error') {
+                console.error('[STT] WebSocket Error from Server:', msg.message);
+                sendToRenderer('log-message', `Lỗi STT Server: ${msg.message}`, 'error');
+            }
+        } catch (e) {
+            console.error('[STT] Failed to parse WS message:', e);
+        }
+    });
+
+    state.wsSTT.on('error', (err) => {
+        console.error('[STT] WebSocket Error:', err.message);
+        sendToRenderer('log-message', `Lỗi kết nối WebSocket: ${err.message}`, 'error');
+    });
+
+    state.wsSTT.on('close', () => {
+        console.log('[STT] WebSocket closed');
+        if (state.isStreaming && state.wsReconnectAttempts < config.MAX_WS_RECONNECT_ATTEMPTS) {
+            const delay = Math.min(1000 * Math.pow(2, state.wsReconnectAttempts), 10000);
+            const targetLang = state.currentSettings.targetLang;
+            console.log(`[STT] Reconnecting in ${delay}ms... (Attempt ${state.wsReconnectAttempts + 1}/${config.MAX_WS_RECONNECT_ATTEMPTS})`);
+            console.log(`[STT] Reconnect params: source=${sourceLangCode}, target=${targetLang}`);
+            
+            if (state.wsReconnectTimer) clearTimeout(state.wsReconnectTimer);
+            state.wsReconnectTimer = setTimeout(() => {
+                state.wsReconnectAttempts++;
+                initWebSocketSTT(sourceLangCode, targetLang, sampleRate, token);
+            }, delay);
+        } else if (state.wsReconnectAttempts >= config.MAX_WS_RECONNECT_ATTEMPTS) {
+            sendToRenderer('log-message', 'Không thể kết nối lại WebSocket sau nhiều lần thử. Vui lòng kiểm tra mạng.', 'error');
+        }
+    });
 }
 
 // Backend STT streaming functions
@@ -748,17 +780,17 @@ let streamRecreationTimer = null;
 // Fixed thresholds caused regressions when sample rate changed (48k -> 16k).
 // Use dynamic chunk sizing so backend STT always gets a sufficient window.
 // Increase window to give STT enough context (reduce empty transcripts)
-const TARGET_REALTIME_WINDOW_MS = 2000;
+const TARGET_REALTIME_WINDOW_MS = 800; // Reduced from 2000ms for faster initial transcript
 
 // Recreate stream every 5 minutes to prevent long-running issues
 function scheduleStreamRecreation() {
     if (streamRecreationTimer) clearTimeout(streamRecreationTimer);
     streamRecreationTimer = setTimeout(() => {
         console.log('[STT] Recreating stream for long-running stability...');
-        if (isStreaming && currentSettings.sourceLang) {
+        if (state.isStreaming && state.currentSettings.sourceLang) {
             stopStream();
             setTimeout(() => {
-                startStream(currentSettings.sourceLang, currentSettings.sampleRate);
+                startStream(state.currentSettings.sourceLang, state.currentSettings.sampleRate);
                 console.log('[STT] Stream recreated successfully');
             }, 100);
         }
@@ -766,207 +798,58 @@ function scheduleStreamRecreation() {
     }, 5 * 60 * 1000); // 5 minutes
 }
 
-function getRealtimeChunkThresholds(sampleRate) {
-    const safeRate = Number(sampleRate) > 0 ? Number(sampleRate) : 16000;
-    // Target ~1.6s of audio to improve STT accuracy; allow fallback at max interval
-    const minChunkSizeBytes = Math.round((safeRate * 2) * 1.6);
-    const maxIntervalMs = 4500;
-    return {
-        minChunkIntervalMs: TARGET_REALTIME_WINDOW_MS,
-        minChunkSizeBytes,
-        maxIntervalMs
-    };
-}
-
-function sendAudioChunkToBackend(chunk, language, sampleRate) {
-    // Add to buffer for smart processing
-    audioBuffer.push(chunk);
-    const now = Date.now();
-
-    if (!lastProcessTime) {
-        lastProcessTime = now;
-    }
-    
-    audioChunkLogCounter++;
-    if (audioChunkLogCounter % 40 === 0) {
-        console.log(`🎤 Audio chunk received: ${chunk.length} bytes, buffer: ${audioBuffer.length} chunks`);
-    }
-    
-    // Process immediately if buffer is large enough or enough time passed
-    const totalSize = audioBuffer.reduce((sum, buf) => sum + buf.length, 0);
-    const timeSinceLastProcess = now - lastProcessTime;
-    const approxAudioMs = Math.round((totalSize / (sampleRate * 2)) * 1000);
-    const { minChunkIntervalMs, minChunkSizeBytes, maxIntervalMs } = getRealtimeChunkThresholds(sampleRate);
-    
-    // Require at least minChunkSizeBytes unless we've waited too long (maxIntervalMs)
-    if (totalSize < minChunkSizeBytes && timeSinceLastProcess < maxIntervalMs) {
-        return;
-    }
-    
-    if (totalSize >= minChunkSizeBytes || timeSinceLastProcess >= maxIntervalMs) {
-        // Log less frequently to reduce noise
-        if (audioChunkLogCounter % 20 === 0) {
-            console.log(`🎤 Triggering real-time processing (${totalSize} bytes, ~${approxAudioMs}ms audio, ${timeSinceLastProcess}ms since last, minBytes=${minChunkSizeBytes}, minMs=${minChunkIntervalMs})`);
-        }
-        const combinedChunk = Buffer.concat(audioBuffer);
-        processAudioChunk(combinedChunk, language, sampleRate);
-        audioBuffer = [];
-        lastProcessTime = now;
-    }
-}
-
-async function processAudioChunk(chunk, language, sampleRate) {
-    try {
-        // Convert chunk to base64 immediately
-        const audioBase64 = chunk.toString('base64');
-        
-        console.log(`🎤 Processing real-time chunk: ${chunk.length} bytes`);
-        
-        // Send to backend for immediate recognition
-        const response = await fetch(`${BACKEND_URL}/api/stt/recognize`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                audio: audioBase64,
-                language: language,
-                sampleRate: sampleRate
-            })
-        });
-
-        console.log(`🎤 Real-time backend response: ${response.status}`);
-
-        if (response.ok) {
-            const result = await response.json();
-            console.log(`🎤 Real-time result:`, result);
-            
-            if (result.transcript && result.transcript.trim().length > 0) {
-                handleSTTData({
-                    transcript: result.transcript,
-                    isFinal: true,
-                    confidence: result.confidence || 0
-                });
-            }
-        }
-    } catch (error) {
-        console.error('🎤 Real-time processing error:', error);
-        // Don't show error to user for real-time chunks to avoid spam
-    }
-}
-
-async function processAudioBatch(language, sampleRate) {
-    if (audioBuffer.length === 0) return;
-    
-    try {
-        // Combine all audio chunks
-        const combinedAudio = Buffer.concat(audioBuffer);
-        const audioBase64 = combinedAudio.toString('base64');
-        
-        console.log(`🎤 Processing audio batch: ${audioBuffer.length} chunks, ${combinedAudio.length} bytes`);
-        
-        // Only process if we have enough audio (at least 1 second)
-        if (combinedAudio.length < 48000) { // 1 second at 48kHz
-            console.log(`🎤 Audio too short (${combinedAudio.length} bytes), skipping processing`);
-            return;
-        }
-        
-        // Send to backend for recognition
-        const response = await fetch(`${BACKEND_URL}/api/stt/recognize`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                audio: audioBase64,
-                language: language,
-                sampleRate: sampleRate
-            })
-        });
-
-        console.log(`🎤 Backend response status: ${response.status}`);
-
-        if (!response.ok) {
-            throw new Error(`Backend STT error: ${response.status}`);
-        }
-
-        const result = await response.json();
-        
-        console.log(`🎤 Backend result:`, result);
-        
-        if (result.transcript && result.transcript.trim().length > 0) {
-            handleSTTData({
-                transcript: result.transcript,
-                isFinal: true,
-                confidence: result.confidence || 0
-            });
-        } else {
-            console.log(`🎤 No speech detected in audio batch`);
-        }
-
-        if (result.error) {
-            handleSTTData({ error: result.error });
-        }
-
-    } catch (error) {
-        console.error('Backend STT batch error:', error);
-        sendToRenderer('log-message', `STT ERROR: ${error.message}`, 'error');
-        if (recognizeStream && recognizeStream.errorCallback) {
-            recognizeStream.errorCallback(error);
-        }
-    } finally {
-        // Clear buffer and reset timer
-        audioBuffer = [];
-        backendStreamResponse = null;
-        console.log(`🎤 Audio buffer cleared, ready for next batch`);
-        
-        // Continue processing if still streaming
-        if (isStreaming) {
-            console.log(`🎤 Still streaming, setting up next batch processing`);
-            backendStreamResponse = setTimeout(() => {
-                processAudioBatch(language, sampleRate);
-            }, 3000); // Use 3 seconds
-        }
-    }
-}
 
 function handleSTTData(data) {
     if (data.done) {
-        if (recognizeStream && recognizeStream.endCallback) {
-            recognizeStream.endCallback();
-        }
         return;
     }
 
     if (data.error) {
         sendToRenderer('log-message', `STT Stream ERROR: ${data.error}`, 'error');
-        if (recognizeStream && recognizeStream.errorCallback) {
-            recognizeStream.errorCallback(new Error(data.error));
-        }
         return;
     }
 
     const transcript = data.transcript || '';
+    const translation = data.translation || '';
     const isFinal = data.isFinal || false;
 
     if (isFinal) {
-        lastFinalTranscript = transcript;
-        sendToRenderer('stt-final', transcript);
-        sendToRenderer('log-message', `Nhận được transcript (final): ${transcript}`, 'info');
-        if (!didTranslateForUtterance) {
-            enqueueTts(transcript, currentSettings.targetLang, currentSettings.ttsEngine);
-            didTranslateForUtterance = true;
+        const charCount = transcript.trim().length;
+        console.log(`[STT] FINAL TRANSCRIPT: "${transcript}" (Length: ${charCount})`);
+        
+        state.lastFinalTranscript = transcript;
+        sendToRenderer('stt-transcript', { transcript, isFinal: true });
+        
+        if (translation) {
+            console.log(`[STT] Found pre-translation: ${translation}`);
+            sendToRenderer('log-message', `Nhận được bản dịch từ backend: ${transcript} -> ${translation}`, 'success');
+            if (!state.didTranslateForUtterance) {
+                enqueueTts(transcript, state.currentSettings.targetLang, state.currentSettings.ttsEngine, translation);
+                state.didTranslateForUtterance = true;
+            }
+        } else {
+            sendToRenderer('log-message', `Nhận được transcript (final): ${transcript}`, 'info');
+            if (!state.didTranslateForUtterance) {
+                console.log(`[STT] No pre-translation, triggering normal translation/TTS flow`);
+                enqueueTts(transcript, state.currentSettings.targetLang, state.currentSettings.ttsEngine);
+                state.didTranslateForUtterance = true;
+            }
         }
+        // IMPORTANT: Reset the translation flag for the next utterance
+        state.didTranslateForUtterance = false;
+        state.sttFinalizing = false; // Reset finalizing flag after we get the final result
     } else {
-        lastPartialTranscript = transcript;
-        sendToRenderer('stt-partial', transcript);
+        state.lastPartialTranscript = transcript;
+        sendToRenderer('stt-transcript', { transcript, isFinal: false });
         if (transcript.trim().length > 0) {
+            // Only log meaningful partials to console
+            if (isDev) console.log(`[STT] partial: ${transcript}`);
             sendToRenderer('log-message', `Nhận được transcript (partial): ${transcript}`, 'info');
         }
     }
 
-    if (recognizeStream && recognizeStream.dataCallback) {
-        recognizeStream.dataCallback({
+    if (state.recognizeStream && state.recognizeStream.dataCallback) {
+        state.recognizeStream.dataCallback({
             results: [{
                 alternatives: [{ transcript }],
                 isFinal
@@ -986,27 +869,44 @@ function endBackendStream() {
 }
 
 function stopStream() {
-    if (recognizeStream) {
-        recognizeStream.end();
-        recognizeStream = null;
-        isStreaming = false;
+    if (state.wsSTT) {
+        try { 
+            state.wsSTT.send(JSON.stringify({ type: 'stt_stop' })); 
+        } catch (e) {
+            logger.debug('WebSocket', 'Failed to send stt_stop on closed socket');
+        }
+        try { 
+            state.wsSTT.close(); 
+        } catch (e) {
+            logger.error('WebSocket', 'Failed to close WebSocket', e);
+        }
+        state.wsSTT = null;
     }
+    if (state.recognizeStream) {
+        state.recognizeStream.end();
+        state.recognizeStream = null;
+    }
+    state.isStreaming = false;
     
     // Clear stream recreation timer
-    if (streamRecreationTimer) {
-        clearTimeout(streamRecreationTimer);
-        streamRecreationTimer = null;
+    if (state.streamRecreationTimer) {
+        clearTimeout(state.streamRecreationTimer);
+        state.streamRecreationTimer = null;
     }
+
+    if (state.wsReconnectTimer) {
+        clearTimeout(state.wsReconnectTimer);
+        state.wsReconnectTimer = null;
+    }
+    state.wsReconnectAttempts = 0;
     
     endBackendStream();
-    sttFinalizing = false;
-    lastPartialTranscript = '';
-    lastFinalTranscript = '';
-    didTranslateForUtterance = false;
+    resetSTTState();
 }
 
 ipcMain.on('audio-chunk', (event, chunk) => {
-    if (recognizeStream && isStreaming && !sttFinalizing) {
+    if (!validateIPC('audio-chunk', chunk)) return;
+    if (state.isStreaming && !state.sttFinalizing) {
         let buf = null;
         if (Buffer.isBuffer(chunk)) {
             buf = chunk;
@@ -1015,8 +915,19 @@ ipcMain.on('audio-chunk', (event, chunk) => {
         } else if (chunk && chunk.buffer) {
             buf = Buffer.from(chunk.buffer);
         }
+
         if (buf && buf.length > 0) {
-            recognizeStream.write(buf);
+            // Enhanced logging for first chunk arrival
+            if (!state.audioArrivalLogged) {
+                console.log(`[MAIN] First audio chunk arrived: ${buf.length} bytes`);
+                state.audioArrivalLogged = true;
+            }
+
+            // Send to WebSocket ONLY — no HTTP fallback to avoid 500 spam during reconnect
+            if (state.wsSTT && state.wsSTT.readyState === WebSocket.OPEN) {
+                state.wsSTT.send(buf);
+            }
+            // Chunk is silently dropped while WS is reconnecting
         }
     }
 });
@@ -1025,24 +936,23 @@ ipcMain.on('audio-chunk', (event, chunk) => {
 // =========================================================
 // 8. XỬ LÝ SỰ KIỆN GIAO DIỆN VÀ CẤU HÌNH (IPC HANDLERS) (GIỮ NGUYÊN)
 // =========================================================
-ipcMain.on('translation:toggle', (event, { isTranslating, sourceLang, targetLang, ttsEngine, sensitivity, sampleRate }) => {
-    try { 
-        console.log(`[MAIN PROCESS CHECK] IPC TOGGLE RECEIVED. isTranslating: ${isTranslating}, sampleRate: ${sampleRate}`);
-        event.reply('server:status', { connected: true, latency: 50 });
-
+ipcMain.on('translation:toggle', (event, data) => {
+    if (!validateIPC('translation:toggle', data)) return;
+    try {
+        const { isTranslating, sourceLang, targetLang, ttsEngine, sensitivity, sampleRate, token } = data;
         if (isTranslating) {
-            if (isStreaming && recognizeStream && currentSettings.sourceLang === sourceLang && currentSettings.targetLang === targetLang && currentSettings.ttsEngine === ttsEngine && currentSettings.sampleRate === (sampleRate || currentSettings.sampleRate)) {
-                return;
-            }
-            currentSettings.sourceLang = sourceLang;
-            currentSettings.targetLang = targetLang;
-            currentSettings.ttsEngine = ttsEngine;
-            currentSettings.sensitivity = sensitivity || 50; 
-            currentSettings.sampleRate = sampleRate || 16000;
+            updateSettings({
+                sourceLang,
+                targetLang,
+                ttsEngine,
+                sensitivity: sensitivity || 50,
+                sampleRate: sampleRate || 16000,
+                token: token || ''
+            });
             sendToRenderer('log-message', `[MAIN PROCESS] Đã nhận lệnh START. Source: ${sourceLang}`, 'info'); 
-            startStream(sourceLang, currentSettings.sampleRate); // Pass sampleRate
+            startStream(sourceLang, state.currentSettings.sampleRate, state.currentSettings.token); 
         } else {
-            if (!isStreaming) {
+            if (!state.isStreaming) {
                 return;
             }
             sendToRenderer('log-message', `[MAIN PROCESS] Đã nhận lệnh STOP.`, 'info'); 
@@ -1069,21 +979,26 @@ ipcMain.on('overlay:hide', () => {
 
 ipcMain.on('stt:finalize', () => {
     try {
-        if (recognizeStream && isStreaming) {
-            sttFinalizing = true;
-            recognizeStream.end();
+        if (state.isStreaming && !state.sttFinalizing) {
+            state.sttFinalizing = true;
+            // For WebSocket, we could send a specific flag if the backend supports it,
+            // but usually we just wait for the silence-based final result.
+            // If we want to FORCE finalization, we might close the WS, 
+            // but that stops the whole session.
+            console.log('[STT] Finalize requested (waiting for backend to finalize on silence)');
         }
-    } catch {}
+    } catch (e) {
+        logger.error('STT', 'Failed during STT finalize', e);
+    }
 });
 
 ipcMain.on('audio:autoconfigure', (event) => {
     console.log('[MAIN PROCESS] IPC: Kích hoạt cấu hình Audio tự động...');
-    sendToRenderer('log-message', 'Bắt đầu cấu hình VAC/Audio Driver...', 'info');
+    sendToRenderer('log-message', 'Tính năng cấu hình Audio tự động đang được phát triển...', 'info');
     
     setTimeout(() => {
-        event.reply('audio:status', { success: true, message: 'Cấu hình Audio hoàn tất.' }); 
-        sendToRenderer('log-message', 'Cấu hình Audio (Giả lập) hoàn tất.', 'success');
-    }, 3000); 
+        event.reply('audio:status', { success: false, message: 'Tính năng đang phát triển. Vui lòng cài đặt Virtual Audio Cable thủ công.' }); 
+    }, 1000); 
 });
 
 ipcMain.on('window:close', () => {
@@ -1094,12 +1009,29 @@ ipcMain.on('window:minimize', () => {
     if (mainWindow) mainWindow.minimize();
 });
 
-ipcMain.handle('cyan:getBackendUrl', async () => BACKEND_URL);
+ipcMain.handle('cyan:getBackendUrl', async () => config.BACKEND_URL);
 ipcMain.handle('cyan:getInstallId', async () => getInstallId());
 ipcMain.handle('cyan:openExternal', async (_event, url) => {
+    console.log('[MAIN] IPC: Received cyan:openExternal request for:', url);
+    if (!validateIPC('cyan:openExternal', url)) {
+        console.error('[MAIN] IPC: Validation failed for cyan:openExternal:', url);
+        return { ok: false };
+    }
     const u = (url || '').toString().trim();
     if (!u) return { ok: false };
-    try { await shell.openExternal(u); return { ok: true }; } catch { return { ok: false }; }
+    // Security: Only allow http and https protocols
+    if (!u.startsWith('http://') && !u.startsWith('https://')) {
+        console.warn('[MAIN] Blocked non-http(s) external URL:', u);
+        return { ok: false };
+    }
+    try { 
+        console.log('[MAIN] Opening external URL via shell:', u);
+        await shell.openExternal(u); 
+        return { ok: true }; 
+    } catch (e) { 
+        logger.error('Shell', `Failed to open external URL: ${u}`, e);
+        return { ok: false }; 
+    }
 });
 
 // 9. CẤU HÌNH VÀ TẠO CỬA SỔ
@@ -1117,7 +1049,7 @@ function createWindow() {
             nodeIntegration: false,
             contextIsolation: true,
             enableRemoteModule: false,
-            webSecurity: !isDev,
+            webSecurity: !config.IS_DEV,
             backgroundThrottling: false,
             webviewTag: true,
             preload: path.join(__dirname, 'preload.js')
@@ -1127,28 +1059,48 @@ function createWindow() {
     });
 
     // Check environment variable for port or default to 5173
+    // Use 5421 as a secondary fallback if Vite switched ports
     const port = process.env.PORT || 5173;
-    const startUrl = isDev
+    const startUrl = config.IS_DEV
         ? `http://localhost:${port}`
         : `file://${path.join(__dirname, 'renderer/dist/index.html')}`;
 
-    mainWindow.loadURL(startUrl);
+    console.log(`[MAIN] Loading UI from: ${startUrl} (Dev Mode: ${config.IS_DEV})`);
+    mainWindow.loadURL(startUrl).catch(async (err) => {
+        if (config.IS_DEV && port === 5173) {
+            console.warn('[MAIN] Port 5173 failed, trying secondary 5421...');
+            return mainWindow.loadURL('http://localhost:5421');
+        }
+        throw err;
+    });
 
-    if (isDev) {
+    if (config.IS_DEV) {
         mainWindow.webContents.openDevTools({ mode: 'detach' });
     }
     mainWindow.webContents.on('did-finish-load', () => {
-        rendererAlive = true;
-        suppressRendererIpc = false;
+        state.rendererAlive = true;
+        state.suppressRendererIpc = false;
     });
     mainWindow.webContents.on('render-process-gone', (event, details) => {
-        rendererAlive = false;
-        try { stopStream(); } catch {}
-        try { if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.hide(); } catch {}
-        suppressRendererIpc = true;
-        try { console.error('[Renderer Gone]', details && details.reason ? details.reason : 'unknown'); } catch {}
+        state.rendererAlive = false;
+        try { 
+            stopStream(); 
+        } catch (e) {
+            logger.error('Lifecycle', 'Failed to stop stream after renderer gone', e);
+        }
+        try { 
+            if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.hide(); 
+        } catch (e) {
+            logger.debug('Lifecycle', 'Failed to hide overlay after renderer gone');
+        }
+        state.suppressRendererIpc = true;
+        try { 
+            logger.error('Lifecycle', 'Main renderer process gone', details); 
+        } catch (e) {
+            console.error('[Renderer Gone]', details && details.reason ? details.reason : 'unknown'); 
+        }
     });
-    mainWindow.webContents.on('destroyed', () => { rendererAlive = false; });
+    mainWindow.webContents.on('destroyed', () => { state.rendererAlive = false; });
 
     mainWindow.once('ready-to-show', () => {
         mainWindow.show();
@@ -1173,9 +1125,9 @@ function createOverlayWindow() {
         skipTaskbar: true,
         resizable: false,
         webPreferences: {
-            nodeIntegration: true,
-            contextIsolation: false,
-            enableRemoteModule: true
+            nodeIntegration: false,
+            contextIsolation: true,
+            preload: path.join(__dirname, 'preload-overlay.js')
         },
         title: 'Translation Overlay',
         show: false // Hide initially
@@ -1184,12 +1136,12 @@ function createOverlayWindow() {
     const overlayPath = path.join(__dirname, 'overlay.html');
     overlayWindow.loadFile(overlayPath);
 
-    if (isDev) {
+    if (config.IS_DEV) {
         overlayWindow.webContents.openDevTools({ mode: 'detach' });
     }
-    overlayWindow.webContents.on('did-finish-load', () => { overlayAlive = true; });
-    overlayWindow.webContents.on('render-process-gone', () => { overlayAlive = false; });
-    overlayWindow.webContents.on('destroyed', () => { overlayAlive = false; });
+    overlayWindow.webContents.on('did-finish-load', () => { state.overlayAlive = true; });
+    overlayWindow.webContents.on('render-process-gone', () => { state.overlayAlive = false; });
+    overlayWindow.webContents.on('destroyed', () => { state.overlayAlive = false; });
 
     overlayWindow.setAlwaysOnTop(true, 'screen-saver');
     console.log('Overlay window created');
@@ -1217,7 +1169,7 @@ function startHealthCheck() {
     healthCheckInterval = setInterval(async () => {
         try {
             const startTime = Date.now();
-            const response = await fetch(`${BACKEND_URL}/api/health`);
+            const response = await fetch(`${config.BACKEND_URL}/health`);
             const status = response.ok ? 'OK' : 'ERROR';
             const latency = Date.now() - startTime;
             
