@@ -72,25 +72,49 @@ export const useAudioPipeline = () => {
     };
 
     const stopMicrophone = () => {
-        if (processorRef.current) {
-            processorRef.current.disconnect();
-            processorRef.current = null;
+        try {
+            if (processorRef.current) {
+                if (processorRef.current.port) {
+                    processorRef.current.port.onmessage = null;
+                }
+                processorRef.current.disconnect();
+                processorRef.current = null;
+            }
+            
+            if (sourceRef.current) {
+                sourceRef.current.disconnect();
+                sourceRef.current = null;
+            }
+            
+            if (gainNodeRef.current) {
+                gainNodeRef.current.disconnect();
+                gainNodeRef.current = null;
+            }
+
+            if (mediaStreamRef.current) {
+                mediaStreamRef.current.getTracks().forEach(track => {
+                    console.log('[AudioPipeline] Stopping track:', track.kind);
+                    track.stop();
+                });
+                mediaStreamRef.current = null;
+            }
+
+            if (audioContextRef.current) {
+                if (audioContextRef.current.state !== 'closed') {
+                    audioContextRef.current.close();
+                    console.log('[AudioPipeline] AudioContext closed');
+                }
+                audioContextRef.current = null;
+            }
+
+            setMicVolume(0);
+            detectedAudioRef.current = false;
+            workletLoadedRef.current = false;
+            chunkBufferRef.current = [];
+            isVoiceActiveRef.current = false;
+        } catch (error) {
+            console.error('[AudioPipeline] Error in stopMicrophone:', error);
         }
-        if (sourceRef.current) {
-            sourceRef.current.disconnect();
-            sourceRef.current = null;
-        }
-        if (mediaStreamRef.current) {
-            mediaStreamRef.current.getTracks().forEach(track => track.stop());
-            mediaStreamRef.current = null;
-        }
-        if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-            // Instead of closing, we suspend to preserve the context if needed,
-            // or let the useEffect cleanup handle it.
-        }
-        setMicVolume(0);
-        detectedAudioRef.current = false;
-        workletLoadedRef.current = false;
     };
 
     const startMicrophone = async () => {
@@ -128,19 +152,26 @@ export const useAudioPipeline = () => {
             gainNode.gain.setValueAtTime(settings.micGain || 1.0, audioCtx.currentTime);
 
             // Load AudioWorklet from Blob (Robust approach)
+            let workletUrl = null;
             try {
                 const blob = new Blob([WORKLET_CODE], { type: 'application/javascript' });
-                const workletUrl = URL.createObjectURL(blob);
+                workletUrl = URL.createObjectURL(blob);
                 await audioCtx.audioWorklet.addModule(workletUrl);
-                URL.revokeObjectURL(workletUrl);
                 workletLoadedRef.current = true;
             } catch (err) {
+                // Always revoke blob URL on error
+                if (workletUrl) URL.revokeObjectURL(workletUrl);
+                
                 if (err.name === 'AbortError' || err.message.includes('aborted')) {
                     console.warn('[AudioPipeline] AudioWorklet loading was aborted. Likely a component remount.');
+                    stopMicrophone(); // Cleanup partial state
                     return; // Silent exit if just a remount
                 }
                 console.error('[AudioPipeline] Failed to load AudioWorklet module:', err);
                 throw new Error(`Không thể nạp trình xử lý âm thanh: ${err.message}`);
+            } finally {
+                // Cleanup blob URL after successful load
+                if (workletUrl) URL.revokeObjectURL(workletUrl);
             }
 
             const workletNode = new AudioWorkletNode(audioCtx, 'mic-processor');
@@ -253,6 +284,9 @@ export const useAudioPipeline = () => {
             addLog('Phòng thu âm thanh đã sẵn sàng.', 'success');
 
         } catch (e) {
+            // Cleanup on error to prevent partial state leaks
+            stopMicrophone();
+            
             if (e.message !== 'The user aborted a request.') {
                 console.error('Microphone init error:', e);
                 addLog(`Lỗi micro: ${e.message}`, 'error');

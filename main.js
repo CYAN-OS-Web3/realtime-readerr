@@ -1071,18 +1071,21 @@ ipcMain.on('translation:toggle', (event, data) => {
 });
 
 ipcMain.on('overlay:show', () => {
+    if (!validateIPC('overlay:show')) return;
     if (overlayWindow && !overlayWindow.isDestroyed()) {
         overlayWindow.showInactive();
     }
 });
 
 ipcMain.on('overlay:hide', () => {
+    if (!validateIPC('overlay:hide')) return;
     if (overlayWindow && !overlayWindow.isDestroyed()) {
         overlayWindow.hide();
     }
 });
 
 ipcMain.on('stt:finalize', () => {
+    if (!validateIPC('stt:finalize')) return;
     try {
         if (state.isStreaming && !state.sttFinalizing) {
             state.sttFinalizing = true;
@@ -1098,6 +1101,7 @@ ipcMain.on('stt:finalize', () => {
 });
 
 ipcMain.on('audio:autoconfigure', (event) => {
+    if (!validateIPC('audio:autoconfigure')) return;
     console.log('[MAIN PROCESS] IPC: Kích hoạt cấu hình Audio tự động...');
     sendToRenderer('log-message', 'Tính năng cấu hình Audio tự động đang được phát triển...', 'info');
     
@@ -1107,10 +1111,12 @@ ipcMain.on('audio:autoconfigure', (event) => {
 });
 
 ipcMain.on('window:close', () => {
+    if (!validateIPC('window:close')) return;
     if (mainWindow) mainWindow.close();
 });
 
 ipcMain.on('window:minimize', () => {
+    if (!validateIPC('window:minimize')) return;
     if (mainWindow) mainWindow.minimize();
 });
 
