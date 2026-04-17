@@ -1000,75 +1000,134 @@ function stopStream() {
 }
 
 ipcMain.on('audio-chunk', (event, chunk) => {
-    if (!validateIPC('audio-chunk', chunk)) return;
-    if (state.isStreaming && !state.sttFinalizing) {
+    // SEC-002: Validate audio chunk before processing
+    if (!validateIPC('audio-chunk', chunk)) {
+        console.error('[IPC Security] Rejected invalid audio chunk type');
+        return;
+    }
+    
+    if (!state.isStreaming || state.sttFinalizing) {
+        return; // Silently ignore if not streaming
+    }
+    
+    try {
         let buf = null;
         if (Buffer.isBuffer(chunk)) {
             buf = chunk;
         } else if (chunk instanceof Uint8Array) {
             buf = Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength);
-        } else if (chunk && chunk.buffer) {
+        } else if (chunk && chunk.buffer instanceof ArrayBuffer) {
             buf = Buffer.from(chunk.buffer);
         }
 
-        if (buf && buf.length > 0) {
-            // Enhanced logging for first chunk arrival
-            if (!state.audioArrivalLogged) {
-                console.log(`[MAIN] First audio chunk arrived: ${buf.length} bytes`);
-                state.audioArrivalLogged = true;
-            }
-
-            // Send to WebSocket ONLY — no HTTP fallback to avoid 500 spam during reconnect
-            if (state.wsSTT && state.wsSTT.readyState === WebSocket.OPEN) {
-                state.wsSTT.send(buf);
-                state.chunkCounter++;
-                
-                // Log progress every 100 chunks (~5-10 seconds of audio)
-                if (state.chunkCounter % 100 === 0) {
-                    console.log(`[STT WS] Sent ${state.chunkCounter} chunks (${buf.length} bytes each)`);
-                }
-            } else if (state.wsSTT && state.wsSTT.readyState === WebSocket.CONNECTING) {
-                // Silently drop or queue? Dropping for now to avoid congestion
-            }
-            // Chunk is silently dropped while WS is reconnecting
+        if (!buf || buf.length === 0) {
+            console.warn('[Audio] Received empty buffer');
+            return;
         }
+        
+        // Safety check: reject suspiciously large chunks (>1MB indicates potential memory attack)
+        if (buf.length > 1024 * 1024) {
+            console.error('[IPC Security] Rejected oversized audio chunk:', buf.length, 'bytes');
+            return;
+        }
+
+        // Enhanced logging for first chunk arrival
+        if (!state.audioArrivalLogged) {
+            console.log(`[MAIN] First audio chunk arrived: ${buf.length} bytes`);
+            state.audioArrivalLogged = true;
+        }
+
+        // Send to WebSocket ONLY — no HTTP fallback to avoid 500 spam during reconnect
+        if (state.wsSTT && state.wsSTT.readyState === WebSocket.OPEN) {
+            state.wsSTT.send(buf);
+            state.chunkCounter++;
+            
+            // Log progress every 100 chunks (~5-10 seconds of audio)
+            if (state.chunkCounter % 100 === 0) {
+                console.log(`[STT WS] Sent ${state.chunkCounter} chunks (${buf.length} bytes each)`);
+            }
+        } else if (state.wsSTT && state.wsSTT.readyState === WebSocket.CONNECTING) {
+            // Silently drop during reconnection to avoid congestion
+        }
+        // Chunk is silently dropped while WS is reconnecting
+    } catch (err) {
+        console.error('[IPC Error] Exception in audio-chunk handler:', err.message);
+        // Continue operation, don't crash
     }
 });
 
 
+
 // =========================================================
-// 8. XỬ LÝ SỰ KIỆN GIAO DIỆN VÀ CẤU HÌNH (IPC HANDLERS) (GIỮ NGUYÊN)
+// 8. IPC HANDLERS FOR UI EVENTS AND CONFIGURATION (WITH SEC-002 VALIDATION)
 // =========================================================
+
 ipcMain.on('translation:toggle', (event, data) => {
-    if (!validateIPC('translation:toggle', data)) return;
+    // SEC-002: Validate input data type and schema before processing
+    if (!validateIPC('translation:toggle', data)) {
+        console.error('[IPC Security] Rejected invalid translation:toggle payload');
+        sendToRenderer('log-message', '[Security] Invalid command received (type mismatch)', 'error');
+        return;
+    }
+    
     try {
         const { isTranslating, sourceLang, targetLang, ttsEngine, sensitivity, sampleRate, token } = data;
+        
+        // Additional safety checks for critical fields
+        if (typeof isTranslating !== 'boolean') {
+            throw new Error('isTranslating must be boolean');
+        }
+        
         if (isTranslating) {
+            // Validate required fields for streaming start
+            if (!sourceLang || typeof sourceLang !== 'string' || sourceLang.length === 0) {
+                throw new Error('Invalid sourceLang');
+            }
+            if (!targetLang || typeof targetLang !== 'string' || targetLang.length === 0) {
+                throw new Error('Invalid targetLang');
+            }
+            
             state.chunkCounter = 0;
             state.audioArrivalLogged = false;
+            
+            // Sanitize and validate sampleRate to prevent resource exhaustion
+            let validSampleRate = sampleRate || 16000;
+            if (typeof validSampleRate !== 'number' || validSampleRate < 8000 || validSampleRate > 48000) {
+                console.warn('[IPC] Invalid sample rate, using default 16000');
+                validSampleRate = 16000;
+            }
+            
             updateSettings({
                 sourceLang,
                 targetLang,
-                ttsEngine,
-                sensitivity: sensitivity || 15,
-                sampleRate: sampleRate || 16000,
-                token: token || ''
+                ttsEngine: ttsEngine || 'azure',
+                sensitivity: Math.min(Math.max(sensitivity || 15, 0), 100), // Clamp 0-100
+                sampleRate: validSampleRate,
+                token: (token && typeof token === 'string') ? token.trim() : ''
             });
-            sendToRenderer('log-message', `[MAIN PROCESS] Đã nhận lệnh START. Source: ${sourceLang}`, 'info'); 
-            startStream(sourceLang, state.currentSettings.sampleRate, state.currentSettings.token); 
+            
+            sendToRenderer('log-message', `[MAIN] Starting translation. Source: ${sourceLang}`, 'info'); 
+            startStream(sourceLang, validSampleRate, state.currentSettings.token); 
         } else {
             if (!state.isStreaming) {
+                console.log('[Translation] Stop request but not streaming');
                 return;
             }
-            sendToRenderer('log-message', `[MAIN PROCESS] Đã nhận lệnh STOP.`, 'info'); 
+            sendToRenderer('log-message', '[MAIN] Stopping translation stream', 'info'); 
             stopStream();
         }
     } catch (error) {
-        console.error(`[FATAL IPC ERROR IN translation:toggle]`, error);
-        sendToRenderer('log-message', `LỖI CẤP CAO (IPC): Không thể xử lý luồng dịch thuật.`, 'error'); 
-        stopStream();
+        console.error(`[IPC Error] Exception in translation:toggle:`, error.message);
+        sendToRenderer('log-message', `[Error] Translation control failed: ${error.message}`, 'error'); 
+        // Attempt cleanup to prevent hung state
+        try {
+            stopStream();
+        } catch (e) {
+            logger.debug('Cleanup', 'Failed to stop stream during error recovery');
+        }
     }
 });
+
 
 ipcMain.on('overlay:show', () => {
     if (overlayWindow && !overlayWindow.isDestroyed()) {
@@ -1312,8 +1371,50 @@ function startHealthCheck() {
 // Start health check after app is ready
 setTimeout(startHealthCheck, 500);
 
+// Ensure proper cleanup on app exit (SEC-002 & session stability)
+app.on('before-quit', async (event) => {
+    console.log('[Lifecycle] App closing, cleaning up resources...');
+    
+    // Prevent default quit to allow cleanup
+    event.preventDefault();
+    
+    try {
+        // Stop audio stream
+        console.log('[Cleanup] Stopping stream...');
+        stopStream();
+        
+        // Clear timers
+        if (streamRecreationTimer) {
+            clearTimeout(streamRecreationTimer);
+            streamRecreationTimer = null;
+        }
+        if (healthCheckInterval) {
+            clearInterval(healthCheckInterval);
+            healthCheckInterval = null;
+        }
+        
+        // Close windows
+        if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.destroy();
+        }
+        if (overlayWindow && !overlayWindow.isDestroyed()) {
+            overlayWindow.destroy();
+        }
+        
+        console.log('[Cleanup] Resource cleanup completed');
+    } catch (err) {
+        console.error('[Cleanup Error]', err);
+    }
+    
+    // Force quit after cleanup
+    setTimeout(() => {
+        process.exit(0);
+    }, 500);
+});
+
 app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') {
         app.quit();
     }
 });
+

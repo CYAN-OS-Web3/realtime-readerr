@@ -1,6 +1,8 @@
 node_modules
 .env
 .env.*
+.env.local
+.env.*.local
 !.env.example
 dist
 renderer/dist
@@ -19,3 +21,13 @@ renderer@0.1.0
 
 out/
 .aider*
+backend/
+
+# Secrets and credentials (never commit)
+*.key
+*.pem
+*.p12
+*.keystore
+credentials/
+secrets/
+.vault
