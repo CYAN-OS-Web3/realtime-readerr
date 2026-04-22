@@ -39,6 +39,10 @@ export const ipcService = {
     return api.finalizeUtterance();
   },
 
+  flushAudio: () => {
+    return api.finalizeUtterance();
+  },
+
   showOverlay: () => {
     return api.showOverlay();
   },
@@ -111,5 +115,9 @@ export const ipcService = {
 
   onAudioStatus: (callback) => {
     return api.onAudioStatus(callback);
+  },
+
+  onWSConnectionState: (callback) => {
+    return api.onWSConnectionState(callback);
   }
 };

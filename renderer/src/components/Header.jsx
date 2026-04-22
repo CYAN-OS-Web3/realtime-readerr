@@ -10,7 +10,9 @@ export const Header = () => {
         authUserId, 
         setAuthUserId, 
         setInstallId,
-        addLog
+        addLog,
+        wsConnectionState,
+        isTranslating
     } = useStore();
 
     const handleLogout = () => {
@@ -49,6 +51,25 @@ export const Header = () => {
         }
     };
 
+    // WS connection state display helper
+    const getWSIndicator = () => {
+        if (!isTranslating) return null;
+        const stateMap = {
+            connecting:    { color: 'bg-yellow-500 animate-pulse', label: 'WS CONNECTING' },
+            connected:     { color: 'bg-emerald-500', label: 'STREAM LIVE' },
+            reconnecting:  { color: 'bg-amber-500 animate-pulse', label: 'RECONNECTING' },
+            disconnected:  { color: 'bg-gray-500', label: 'WS DOWN' },
+            failed:        { color: 'bg-red-500', label: 'WS FAILED' },
+        };
+        const info = stateMap[wsConnectionState] || stateMap.disconnected;
+        return (
+            <div className="flex items-center gap-1.5 bg-black/30 px-2 py-0.5 rounded border border-white/5">
+                <div className={`w-1.5 h-1.5 rounded-full ${info.color}`} />
+                <span className="text-[8px] font-black text-gray-400 tracking-widest uppercase">{info.label}</span>
+            </div>
+        );
+    };
+
     return (
         <header className="h-14 bg-black/60 backdrop-blur-md border-b border-gray-800/80 flex items-center justify-between px-6 relative z-30">
             {/* Logo Section */}
@@ -77,6 +98,7 @@ export const Header = () => {
                     {isConnected && (
                         <span className="text-[9px] font-mono text-cyan-500/50 bg-cyan-500/5 px-2 py-0.5 rounded border border-cyan-500/10">{latency}ms</span>
                     )}
+                    {getWSIndicator()}
                 </div>
             </div>
 

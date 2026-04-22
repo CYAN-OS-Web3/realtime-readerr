@@ -40,6 +40,7 @@ export const useAudioPipeline = () => {
     const gainNodeRef = useRef(null);
     const workletLoadedRef = useRef(false);
     const detectedAudioRef = useRef(false);
+    const isRunningRef = useRef(false);
 
     // Accumulation for reducing IPC frequency (100ms chunks)
     const chunkBufferRef = useRef([]);
@@ -72,6 +73,9 @@ export const useAudioPipeline = () => {
     };
 
     const stopMicrophone = () => {
+        if (!isRunningRef.current) return;
+        isRunningRef.current = false;
+
         if (processorRef.current) {
             processorRef.current.disconnect();
             processorRef.current = null;
@@ -91,9 +95,13 @@ export const useAudioPipeline = () => {
         setMicVolume(0);
         detectedAudioRef.current = false;
         workletLoadedRef.current = false;
+        console.log("Microphone stopped");
     };
 
     const startMicrophone = async () => {
+        if (isRunningRef.current) return;
+        isRunningRef.current = true;
+
         try {
             if (mediaStreamRef.current) return;
 
@@ -106,11 +114,14 @@ export const useAudioPipeline = () => {
                     deviceId: settings.inputDeviceId ? { exact: settings.inputDeviceId } : undefined
                 } 
             });
+            console.log("Microphone stream started");
             mediaStreamRef.current = stream;
 
-            const AudioContext = window.AudioContext || window.webkitAudioContext;
-            const audioCtx = new AudioContext();
-            audioContextRef.current = audioCtx;
+            if (!audioContextRef.current) {
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                audioContextRef.current = new AudioContext();
+            }
+            const audioCtx = audioContextRef.current;
             await audioCtx.resume();
 
             const source = audioCtx.createMediaStreamSource(stream);
@@ -229,6 +240,15 @@ export const useAudioPipeline = () => {
                     }
                 } else {
                     const now = Date.now();
+                    
+                    // Periodically send silence to keep the backend connection alive
+                    // even when below threshold (every 3 seconds of silence)
+                    if (!isVoiceActiveRef.current && (now - lastVoiceAtRef.current.t > 3000)) {
+                        const silence = new Int16Array(1600); // ~100ms of silence at 16kHz
+                        ipcService.sendAudioChunk(new Uint8Array(silence.buffer));
+                        lastVoiceAtRef.current.t = now; // Reset timer for next silence chunk
+                    }
+
                     if (hasSentDataRef.current && (now - lastVoiceAtRef.current.t > 1200)) {
                         console.log('[AudioPipeline] Threshold flush (>1.2s)');
                         isVoiceActiveRef.current = false;
@@ -244,7 +264,7 @@ export const useAudioPipeline = () => {
                             ipcService.sendAudioChunk(new Uint8Array(merged.buffer));
                             chunkBufferRef.current = [];
                         }
-                        ipcService.finalizeUtterance();
+                        ipcService.flushAudio(); // Phrase ended, hint backend but KEEP stream alive
                         hasSentDataRef.current = false;
                     }
                 }
@@ -266,7 +286,11 @@ export const useAudioPipeline = () => {
         } else {
             stopMicrophone();
         }
-        return () => stopMicrophone();
+        return () => {
+            if (isRunningRef.current) {
+                stopMicrophone();
+            }
+        };
     }, [isTranslating]);
 
     return {

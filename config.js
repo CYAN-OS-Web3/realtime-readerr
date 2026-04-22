@@ -4,7 +4,7 @@ require('dotenv').config();
 
 module.exports = {
     // Backend & Identity
-    BACKEND_URL: (process.env.BACKEND_URL || 'https://translator-gateway.fly.dev').toString().trim().replace(/\/$/, ''),
+    BACKEND_URL: (process.env.BACKEND_URL || 'http://localhost:8080/').toString().trim().replace(/\/$/, ''),
     CYAN_USER_ID: (process.env.CYAN_USER_ID || '').toString().trim(),
     GCP_PROJECT_ID: (process.env.GCP_PROJECT_ID || '').toString().trim(),
 
@@ -24,7 +24,7 @@ module.exports = {
 
     // File Paths
     MODELS_DIR: path.join(__dirname, 'assets', 'models'),
-    
+
     // Internal Flags
     IS_DEV: process.env.NODE_ENV === 'development' || process.argv.includes('--dev'),
 

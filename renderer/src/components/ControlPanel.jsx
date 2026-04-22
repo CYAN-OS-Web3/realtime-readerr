@@ -38,6 +38,7 @@ export const ControlPanel = () => {
                 setIsTranslating(false);
             }
         } else {
+            console.log("Sending STOP");
             ipcService.toggleTranslation({ isTranslating: false });
             ipcService.hideOverlay();
             setIsTranslating(false);
