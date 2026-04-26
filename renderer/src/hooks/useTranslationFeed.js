@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useStore } from '../store/useStore';
 import { ipcService } from '../services/ipcService';
 
@@ -9,18 +9,7 @@ import { ipcService } from '../services/ipcService';
 export const useTranslationFeed = () => {
     const { 
         isTranslating,
-        addTranscript, 
-        updateLastTranscript, 
-        isConnected, 
-        latency, 
-        authUserId, 
-        setAuthUserId, 
-        setInstallId,
-        addLog,
-        setConnection,
-        setBackendUrl,
-        setWSConnectionState,
-        settings
+        setIsTranslating,
     } = useStore();
 
     // TTS Playback Refs
@@ -32,6 +21,11 @@ export const useTranslationFeed = () => {
     const ttsCloudFadeInDoneRef = useRef(false);
     const cloudAudioRef = useRef(new Audio());
     const ttsFadeMs = 350;
+    const isLocalSpeakingRef = useRef(false);
+    const lastTranslationRef = useRef('');
+    const localTtsTimerRef = useRef(null);
+    const cloudAudioChunksRef = useRef([]); // Buffer for accumulating cloud audio chunks
+    const cloudAudioPlayingRef = useRef(false);
 
     // --- Helpers ---
     
@@ -65,7 +59,7 @@ export const useTranslationFeed = () => {
         return out;
     };
 
-    const schedulePcm = async (chunk, isLocal = false) => {
+    const schedulePcm = useCallback(async (chunk, isLocal = false) => {
         try {
             const chunkSize = chunk?.byteLength || chunk?.length || 0;
             if (!chunk || chunkSize === 0) return;
@@ -86,7 +80,7 @@ export const useTranslationFeed = () => {
                     // Decode compressed audio (MP3/AAC/etc.)
                     audioBuffer = await ctx.decodeAudioData(u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength));
                     console.log(`[TTS] Decoded compressed cloud audio: ${audioBuffer.duration.toFixed(2)}s`);
-                } catch (e) {
+                } catch {
                     console.warn('[TTS] Failed to decode as compressed audio, falling back to PCM logic');
                 }
             }
@@ -111,20 +105,29 @@ export const useTranslationFeed = () => {
         } catch (err) {
             console.error('[TTS] Error scheduling audio:', err);
         }
-    };
+    }, []);
 
     const isTranslatingRef = useRef(isTranslating);
     useEffect(() => {
         isTranslatingRef.current = isTranslating;
     }, [isTranslating]);
 
-    const speakLocal = (text) => {
+    const speakLocal = useCallback((text) => {
         if (!isTranslatingRef.current || !text) return;
         
-        // Stop any current speech
-        window.speechSynthesis.cancel();
+        const langCode = useStore.getState().settings.targetLang;
+        const addLog = useStore.getState().addLog;
         
-        const langCode = settings.targetLang;
+        // Languages with complex scripts that local TTS doesn't handle well
+        const complexScriptLangs = ['hi', 'ta', 'te', 'kn', 'ml', 'ar', 'th', 'km', 'lo'];
+        const langPrefix = langCode.toLowerCase().split('-')[0];
+        
+        if (complexScriptLangs.includes(langPrefix)) {
+            console.log(`[TTS] ⚠️  ${langCode} uses complex script (${langPrefix}). Skipping local TTS - waiting for cloud TTS only.`);
+            addLog(`[TTS] Waiting for cloud TTS for ${langCode}...`, 'warn');
+            return; // Skip local TTS for complex scripts
+        }
+        
         const utterance = new SpeechSynthesisUtterance(text);
         
         // Attempt to find a voice that matches the language
@@ -150,8 +153,50 @@ export const useTranslationFeed = () => {
         
         utterance.volume = 1.0;
         utterance.rate = 1.0;
+        
+        // Track speaking state
+        utterance.onstart = () => {
+            isLocalSpeakingRef.current = true;
+            console.log('[TTS] Local speech started');
+        };
+        
+        utterance.onend = () => {
+            isLocalSpeakingRef.current = false;
+            console.log('[TTS] Local speech ended');
+        };
+        
+        utterance.onerror = (e) => {
+            isLocalSpeakingRef.current = false;
+            console.error('[TTS] Local speech error:', e.error);
+        };
+        
         window.speechSynthesis.speak(utterance);
-    };
+    }, []);
+
+    const clearLocalTtsTimer = useCallback(() => {
+        if (localTtsTimerRef.current) {
+            clearTimeout(localTtsTimerRef.current);
+            localTtsTimerRef.current = null;
+        }
+    }, []);
+
+    const stopTranslationFromVoiceCommand = useCallback(() => {
+        clearLocalTtsTimer();
+        window.speechSynthesis.cancel();
+        cloudAudioRef.current.pause();
+        cloudAudioRef.current.currentTime = 0;
+        cloudAudioChunksRef.current = [];
+        cloudAudioPlayingRef.current = false;
+        isLocalSpeakingRef.current = false;
+        lastTranslationRef.current = '';
+
+        const addLog = useStore.getState().addLog;
+        ipcService.toggleTranslation({ isTranslating: false });
+        ipcService.hideOverlay();
+        setIsTranslating(false);
+        addLog('Voice command detected: cyan sleep. Stopping session.', 'info');
+        console.log('[TTS] Voice command "cyan sleep" detected. Session stopped from renderer.');
+    }, [clearLocalTtsTimer, setIsTranslating]);
 
     // --- Audio Output Routing ---
     useEffect(() => {
@@ -159,15 +204,16 @@ export const useTranslationFeed = () => {
         
         const el = document.getElementById('keep-alive-audio');
         if (el && typeof el.setSinkId === 'function') {
-            const desiredSink = (isTranslating && (settings.outputDeviceId === 'default'))
+            const outputDeviceId = useStore.getState().settings.outputDeviceId;
+            const desiredSink = (isTranslating && (outputDeviceId === 'default'))
                 ? 'communications'
-                : settings.outputDeviceId;
+                : outputDeviceId;
             
             el.setSinkId(desiredSink).catch(err => {
                 console.warn('[TTS] Failed to set sink ID:', err);
             });
         }
-    }, [settings.outputDeviceId, isTranslating]);
+    }, [isTranslating]);
 
     // --- Effects ---
     
@@ -188,83 +234,101 @@ export const useTranslationFeed = () => {
 
     useEffect(() => {
         // --- 1. Initial Data Fetch ---
-        ipcService.getBackendUrl().then(setBackendUrl).catch(console.error);
-        ipcService.getInstallId().then(setInstallId).catch(console.error);
+        ipcService.getBackendUrl().then((url) => useStore.getState().setBackendUrl(url)).catch(console.error);
+        ipcService.getInstallId().then((id) => useStore.getState().setInstallId(id)).catch(console.error);
 
         // --- 2. Listeners ---
 
         const unsubAuth = ipcService.onAuthSync((data) => {
             if (data?.userId) {
-                setAuthUserId(data.userId);
-                setInstallId(data.userId);
+                useStore.getState().setAuthUserId(data.userId);
+                useStore.getState().setInstallId(data.userId);
             }
         });
 
         const unsubStatus = ipcService.onServerStatus((status) => {
-            setConnection(status.connected, status.latency);
+            useStore.getState().setConnection(status.connected, status.latency);
         });
 
         const unsubLog = ipcService.onLogMessage((msg, type) => {
-            addLog(msg, type);
+            useStore.getState().addLog(msg, type);
         });
 
         const unsubSTT = ipcService.onSTTTranscript((data) => {
             // Updated: Only add or update transcripts
             if (data.isFinal) {
-                updateLastTranscript({ source: data.transcript, isFinal: true });
+                useStore.getState().updateLastTranscript({ source: data.transcript, isFinal: true });
+
+                const normalizedTranscript = String(data.transcript || '')
+                    .toLowerCase()
+                    .replace(/[^a-z0-9\s]/g, ' ')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+
+                if (/\btranslation\s+sleep\b/.test(normalizedTranscript)) {
+                    stopTranslationFromVoiceCommand();
+                    return;
+                }
             } else {
                 // For partials, we look at the last entry. If it's not final, update it.
                 // Or if it's the first partial of a new utterance, add it.
-                updateLastTranscript({ source: data.transcript, isFinal: false });
+                useStore.getState().updateLastTranscript({ source: data.transcript, isFinal: false });
             }
         });
 
         const unsubTranslation = ipcService.onTranslationUpdate((data) => {
-            updateLastTranscript({ source: data.sourceText, target: data.translatedText, isFinal: true });
+            useStore.getState().updateLastTranscript({ source: data.sourceText, target: data.translatedText, isFinal: true });
             
-            // Trigger Local TTS for instant feedback
-            if (data.translatedText) {
-                console.log(`[TTS] Incoming translation: "${data.translatedText}". Starting local TTS fallback.`);
-                addLog(`Starting local TTS for: "${data.translatedText.substring(0, 30)}..."`, 'info');
-                speakLocal(data.translatedText);
+            // Delay local TTS for 1 second so cloud audio can arrive first.
+            // If cloud audio starts within that window, the timer is cleared.
+            if (data.translatedText && data.translatedText !== lastTranslationRef.current) {
+                lastTranslationRef.current = data.translatedText;
+                clearLocalTtsTimer();
+
+                console.log(`[TTS] New translation received. Waiting 1s before local fallback: "${data.translatedText.substring(0, 50)}${data.translatedText.length > 50 ? '...' : ''}"`);
+
+                localTtsTimerRef.current = setTimeout(() => {
+                    localTtsTimerRef.current = null;
+
+                    if (!isLocalSpeakingRef.current && !cloudAudioPlayingRef.current && cloudAudioChunksRef.current.length === 0) {
+                        console.log('[TTS] No cloud audio arrived within 1s. Starting local TTS fallback.');
+                        useStore.getState().addLog(`Starting local TTS for: "${data.translatedText.substring(0, 30)}..."`, 'info');
+                        speakLocal(data.translatedText);
+                    } else {
+                        console.log('[TTS] Skipping local TTS because cloud audio arrived in time or is already playing.');
+                    }
+                }, 1200);
             }
         });
 
         const unsubAudioChunk = ipcService.onAudioChunk((chunk) => {
-            const chunkSize = chunk?.byteLength || chunk?.length || 0;
-            const dataType = chunk?.constructor?.name || typeof chunk;
-            console.log(`[TTS] Cloud audio chunk received (${dataType}, ${chunkSize} bytes). Promoting to high-quality cloud voice and cancelling local fallback.`);
-            addLog(`Cloud audio received: ${chunkSize} bytes of ${dataType}`, 'success');
-            
-            // Cancel local speech when professional cloud audio starts arriving
-            window.speechSynthesis.cancel();
-            
-            // Stable Playback: Use a Blob URL for the MP3 data
-            try {
-                const blob = new Blob([chunk], { type: 'audio/mpeg' });
-                const url = URL.createObjectURL(blob);
-                
-                const audio = cloudAudioRef.current;
-                audio.src = url;
-                
-                // Handle routing
-                if (typeof audio.setSinkId === 'function' && settings.outputDeviceId !== 'default') {
-                    audio.setSinkId(settings.outputDeviceId).catch(() => {});
-                }
-                
-                audio.play().catch(e => console.error('[TTS] Audio element play failed:', e));
-                
-                // Cleanup URL after playing
-                audio.onended = () => URL.revokeObjectURL(url);
-            } catch (e) {
-                console.error('[TTS] Failed to play cloud audio via element:', e);
-                // Fallback to PCM scheduler if blob fails
-                schedulePcm(chunk, false);
+            clearLocalTtsTimer();
+
+            // IMMEDIATE: Stop local TTS without delay (synchronous)
+            if (isLocalSpeakingRef.current) {
+                window.speechSynthesis.cancel();
+                isLocalSpeakingRef.current = false;
+                console.log('[TTS] Local TTS cancelled immediately on cloud audio arrival');
             }
             
-            // Fade out local when cloud arrives
+            const chunkSize = chunk?.byteLength || chunk?.length || 0;
+            const dataType = chunk?.constructor?.name || typeof chunk;
+            
+            // Buffer this chunk for later playback
+            cloudAudioChunksRef.current.push(new Uint8Array(chunk));
+            const totalSize = cloudAudioChunksRef.current.reduce((sum, c) => sum + c.length, 0);
+            
+            console.log(`[TTS] Cloud audio chunk ${cloudAudioChunksRef.current.length} received (${dataType}, ${chunkSize} bytes). Total buffered: ${totalSize} bytes`);
+            useStore.getState().addLog(`Cloud audio buffering: ${chunkSize} bytes (chunk ${cloudAudioChunksRef.current.length})`, 'success');
+            
+            // Show first chunk visual indicator
+            if (cloudAudioChunksRef.current.length === 1) {
+                console.log('[TTS] 🎵 First cloud audio chunk arrived - waiting for all chunks...');
+            }
+            
+            // Fade out local when cloud arrives (smooth transition)
             const ctx = ttsCtxRef.current;
-            if (ctx && ttsLocalGainRef.current) {
+            if (ctx && ttsLocalGainRef.current && !cloudAudioPlayingRef.current) {
                 const now = ctx.currentTime;
                 ttsLocalGainRef.current.gain.cancelScheduledValues(now);
                 ttsLocalGainRef.current.gain.setValueAtTime(ttsLocalGainRef.current.gain.value, now);
@@ -272,8 +336,8 @@ export const useTranslationFeed = () => {
                 console.log('[TTS] Local TTS fade-out scheduled');
             }
             
-            // Fade in cloud
-            if (ctx && ttsCloudGainRef.current && !ttsCloudFadeInDoneRef.current) {
+            // Fade in cloud (on first chunk)
+            if (ctx && ttsCloudGainRef.current && !ttsCloudFadeInDoneRef.current && cloudAudioChunksRef.current.length === 1) {
                 const now = ctx.currentTime;
                 ttsCloudGainRef.current.gain.cancelScheduledValues(now);
                 ttsCloudGainRef.current.gain.setValueAtTime(0.0, now);
@@ -289,20 +353,72 @@ export const useTranslationFeed = () => {
         });
 
         const unsubAudioDone = ipcService.onAudioDone(() => {
-            console.log('[TTS] Audio playback done');
+            console.log(`[TTS] 🎉 Audio done signal received. Playing ${cloudAudioChunksRef.current.length} accumulated cloud audio chunks`);
+            
             if (ttsCtxRef.current) {
                 ttsLastScheduledRef.current = Math.max(ttsCtxRef.current.currentTime, ttsLastScheduledRef.current);
             }
             ttsCloudFadeInDoneRef.current = false;
+            isLocalSpeakingRef.current = false;
+            
+            // Now play all accumulated chunks as a single audio blob
+            if (cloudAudioChunksRef.current.length > 0) {
+                try {
+                    // Combine all chunks into a single buffer
+                    const totalSize = cloudAudioChunksRef.current.reduce((sum, c) => sum + c.length, 0);
+                    const combinedBuffer = new Uint8Array(totalSize);
+                    let offset = 0;
+                    for (const chunk of cloudAudioChunksRef.current) {
+                        combinedBuffer.set(chunk, offset);
+                        offset += chunk.length;
+                    }
+                    
+                    console.log(`[TTS] 📦 Combined ${cloudAudioChunksRef.current.length} chunks into ${totalSize} bytes. Creating playable blob...`);
+                    
+                    // Create blob and play
+                    const blob = new Blob([combinedBuffer], { type: 'audio/mpeg' });
+                    const url = URL.createObjectURL(blob);
+                    
+                    const audio = cloudAudioRef.current;
+                    audio.src = url;
+                    
+                    // Handle routing
+                    const outputDeviceId = useStore.getState().settings.outputDeviceId;
+                    if (typeof audio.setSinkId === 'function' && outputDeviceId !== 'default') {
+                        audio.setSinkId(outputDeviceId).catch(() => {});
+                    }
+                    
+                    cloudAudioPlayingRef.current = true;
+                    audio.play().catch(e => console.error('[TTS] Audio element play failed:', e));
+                    
+                    // Cleanup URL after playing
+                    audio.onended = () => {
+                        console.log('[TTS] ✅ Cloud audio playback complete');
+                        URL.revokeObjectURL(url);
+                        cloudAudioPlayingRef.current = false;
+                    };
+                    
+                    console.log('[TTS] ▶️  Playing combined cloud audio now...');
+                } catch (e) {
+                    console.error('[TTS] Failed to play combined cloud audio:', e);
+                    cloudAudioPlayingRef.current = false;
+                }
+            }
+            
+            // Clear chunk buffer for next phrase
+            cloudAudioChunksRef.current = [];
+            // Reset so the next translation can be spoken
+            lastTranslationRef.current = '';
         });
 
         const unsubWSState = ipcService.onWSConnectionState?.((data) => {
             if (data?.state) {
-                setWSConnectionState(data.state);
+                useStore.getState().setWSConnectionState(data.state);
             }
         });
 
         return () => {
+            clearLocalTtsTimer();
             if (typeof unsubAuth === 'function') unsubAuth();
             if (typeof unsubStatus === 'function') unsubStatus();
             if (typeof unsubLog === 'function') unsubLog();
@@ -313,9 +429,6 @@ export const useTranslationFeed = () => {
             if (typeof unsubAudioChunkLocal === 'function') unsubAudioChunkLocal();
             if (typeof unsubWSState === 'function') unsubWSState();
         };
-    }, []);
+    }, [clearLocalTtsTimer, schedulePcm, speakLocal, stopTranslationFromVoiceCommand]);
 
-    return {
-        ttsCtx: ttsCtxRef.current
-    };
 };

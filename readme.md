@@ -53,20 +53,64 @@ Once the virtual microphone is installed:
 
 ## How to Run
 
-1. Clone the repository and install dependencies:
-   ```bash
-   npm install
-    ```
+### 1. Installation
 
-2. Environment variables are already set up with testing values for demonstration purposes. These include temporary keys for Deepgram and Google Cloud APIs.
+Clone the repository and install dependencies:
 
-3. Start the app:
+```bash
+npm install
+cd backend && npm install
+```
 
-   ```bash
-   npm run start
-    ```
+### 2. Environment Configuration (⚠️ IMPORTANT)
 
-4. Open the app in a browser, select the language, and start transcription and translation using the UI.
+**NEVER commit real API keys to git. See [SECURITY.md](./SECURITY.md) for details.**
+
+Create your local `.env` file from the template:
+
+```bash
+# Root directory
+cp .env.example .env
+
+# Backend directory
+cd backend
+cp .env.example .env
+```
+
+Then add your real API credentials to the `.env` files. See available services:
+- **Google Cloud APIs** (TTS & STT)
+- **Azure Cognitive Services** (optional TTS)
+- **Supabase** (backend database)
+- **PayPal** (subscription management)
+- **ElevenLabs** (optional TTS)
+
+### 3. Start the Application
+
+```bash
+npm run start
+```
+
+Or for development with hot reload:
+
+```bash
+npm run dev
+```
+
+### 4. Security Checks
+
+To verify your environment is properly configured:
+
+```bash
+npm run doctor:check
+```
+
+---
+
+**Security Reminders:**
+- ✅ `.env` is in `.gitignore` (never committed)
+- ✅ `.env.example` contains only empty placeholders
+- ✅ Real credentials should be stored in OS Keychain/Credential Manager (Windows/macOS/Linux)
+- ✅ Rotate leaked credentials immediately
 
 
 
