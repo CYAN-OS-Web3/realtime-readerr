@@ -112,6 +112,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
         return () => ipcRenderer.removeListener('auth-sync', handler);
     },
 
+    // Nghe: WebSocket Connection State (connecting/connected/reconnecting/disconnected/failed)
+    onWSConnectionState: (callback) => {
+        const handler = (event, data) => callback(data);
+        ipcRenderer.on('ws-connection-state', handler);
+        return () => ipcRenderer.removeListener('ws-connection-state', handler);
+    },
+
     getBackendUrl: () => ipcRenderer.invoke('cyan:getBackendUrl'),
     getInstallId: () => ipcRenderer.invoke('cyan:getInstallId'),
     openExternal: (url) => ipcRenderer.invoke('cyan:openExternal', url),

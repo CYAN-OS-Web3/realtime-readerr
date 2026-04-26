@@ -271,6 +271,28 @@ function getAzureVoiceName(targetLang) {
     }
 }
 
+function getGoogleVoiceName(targetLang) {
+    const lang = (targetLang || 'en-US').toLowerCase();
+    
+    // Default Wavenet voices for primary languages
+    const map = {
+        'en-us': 'en-US-Wavenet-D',
+        'vi-vn': 'vi-VN-Wavenet-A',
+        'hi-in': 'hi-IN-Wavenet-A',
+        'ja-jp': 'ja-JP-Wavenet-A',
+        'ko-kr': 'ko-KR-Wavenet-A',
+        'fr-fr': 'fr-FR-Wavenet-C',
+        'de-de': 'de-DE-Wavenet-B',
+        'es-es': 'es-ES-Wavenet-B',
+        'it-it': 'it-IT-Wavenet-A',
+        'pt-br': 'pt-BR-Wavenet-A',
+        'ru-ru': 'ru-RU-Wavenet-A'
+    };
+    
+    // Try full code first, then prefix (e.g. 'hi')
+    return map[lang] || map[lang.split('-')[0]] || 'en-US-Wavenet-D';
+}
+
 
 // =========================================================
 // 5. CÁC HÀM GỌI DỊCH VỤ TTS (TEXT-TO-SPEECH) (GIỮ NGUYÊN)
@@ -340,7 +362,8 @@ async function callElevenLabsTTSService(text, targetLang) {
                 text, 
                 language: languageCode, 
                 gender: 'female', 
-                tts_engine: 'elevenlabs' 
+                tts_engine: 'elevenlabs',
+                provider: 'elevenlabs' 
             });
 
             const headers = {
@@ -473,30 +496,44 @@ async function callGoogleWaveNetTTSService(text, targetLang) {
     return callGoogleWaveNetChunkedTTSService(text, targetLang);
 }
 
-function splitIntoSegments(text){
-    const words = (text || '').trim().split(/\s+/).filter(Boolean);
-    if (words.length === 0) return [];
-    // Increase threshold to 50 words to avoid unnecessary chunking
-    if (words.length <= 50) return [text];
+function splitIntoSegments(text, maxChars = 100) {
+    if (!text || text.length <= maxChars) return [text];
+    
+    // Split by common sentence terminators (., !, ?, ।, etc.) and commas
+    // We use a regex that keeps the punctuation with the preceding text
+    const parts = text.match(/[^.!?।,]+[.!?।,]*\s*/g) || [text];
     const segments = [];
-    let i = 0;
-    while (i < words.length){
-        const remain = words.length - i;
-        // Chunk into 40-50 words
-        const sz = Math.min(Math.max(40, Math.min(50, remain)), remain);
-        const chunkWords = words.slice(i, i + sz);
-        segments.push(chunkWords.join(' '));
-        i += sz;
+    let currentSegment = "";
+
+    for (const part of parts) {
+        if ((currentSegment + part).length > maxChars && currentSegment.length > 0) {
+            segments.push(currentSegment.trim());
+            currentSegment = part;
+        } else {
+            currentSegment += part;
+        }
     }
+    
+    if (currentSegment.trim()) {
+        segments.push(currentSegment.trim());
+    }
+    
     return segments;
 }
 
-async function streamWaveNetOnce(text, targetLang, sendDone){
+async function streamWaveNetOnce(text, targetLang, sendDone, retryCount = 0){
     try {
         const languageCode = normalizeLang(targetLang);
         const token = state.currentSettings?.token || '';
         
-        console.log(`🔊 Calling Backend TTS API: "${text}" -> ${languageCode}`);
+        // Validate input
+        if (!text || text.trim().length === 0) {
+            console.warn('[TTS] Empty text, skipping TTS call');
+            if (sendDone !== false) sendToRenderer('tts-audio-done');
+            return;
+        }
+
+        console.log(`🔊 Calling Backend TTS API: "${text.substring(0, 30)}..." -> ${languageCode}${retryCount > 0 ? ` (Retry #${retryCount})` : ''}`);
         
         const headers = {
             'Content-Type': 'application/json'
@@ -506,39 +543,83 @@ async function streamWaveNetOnce(text, targetLang, sendDone){
             headers['Authorization'] = `Bearer ${token}`;
         }
 
+        const requestBody = {
+            text: text,
+            language: languageCode,
+            gender: 'female',
+            user_id: getInstallId(),
+            device_id: getInstallId(),
+            tts_engine: 'google',
+            provider: 'google',
+            voice_id: getGoogleVoiceName(targetLang),
+            sample_rate_hertz: 16000
+        };
+
+        // Log request details for debugging
+        console.log('[TTS] Request payload:', {
+            textLength: text.length,
+            language: languageCode,
+            userId: getInstallId(),
+            engine: 'google'
+        });
+
         const response = await fetch(`${config.BACKEND_URL}/api/v1/tts/speak-stream`, {
             method: 'POST',
             signal: AbortSignal.timeout(30000),
             headers: headers,
-            body: JSON.stringify({
-                text: text,
-                language: languageCode,
-                gender: 'female',
-                user_id: getInstallId(),
-                device_id: getInstallId(),
-                tts_engine: 'google',
-                sample_rate_hertz: 16000
-            })
+            body: JSON.stringify(requestBody)
         });
 
         if (!response.ok) {
+            let errorDetail = '';
+            try {
+                const errorBody = await response.text();
+                errorDetail = errorBody.substring(0, 200); // Limit error message length
+                console.error(`[TTS] Backend error response (${response.status}):`, errorDetail);
+            } catch (e) {
+                console.error(`[TTS] Could not read error body: ${e.message}`);
+            }
+
             if (response.status === 401 || response.status === 403) {
                 sendToRenderer('log-message', `Phiên làm việc hết hạn (401). Vui lòng đăng nhập lại ứng dụng Cyan để tiếp tục.`, 'error');
                 return;
             }
-            throw new Error(`Backend TTS stream error: ${response.status}`);
+
+            // Retry on 5xx errors up to 3 times with exponential backoff
+            if (response.status >= 500 && retryCount < 3) {
+                const delayMs = Math.min(1000 * Math.pow(2, retryCount), 10000);
+                console.log(`[TTS] Retrying in ${delayMs}ms...`);
+                await new Promise(r => setTimeout(r, delayMs));
+                return streamWaveNetOnce(text, targetLang, sendDone, retryCount + 1);
+            }
+
+            throw new Error(`Backend TTS error ${response.status}${errorDetail ? ': ' + errorDetail : ''}`);
         }
 
-        // Handle streaming response
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
+        const contentType = response.headers.get('content-type') || '';
+        console.log(`[TTS] Response received. Status: ${response.status}, Content-Type: ${contentType}`);
+
+        // If it's a raw audio stream (like audio/mpeg or audio/wav), handle it as binary
+        if (contentType.includes('audio/')) {
+            console.log('[TTS] Handling raw binary audio stream');
+            const arrayBuffer = await response.arrayBuffer();
+            const buffer = Buffer.from(arrayBuffer);
+            console.log(`[TTS] Received total binary audio: ${buffer.length} bytes`);
+            sendToRenderer('tts-audio-chunk', new Uint8Array(buffer));
+            if (sendDone !== false) sendToRenderer('tts-audio-done');
+            return;
+        }
+
+        // Otherwise, handle as streaming JSON lines
         let buffer = '';
-        
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            
-            buffer += decoder.decode(value, { stream: true });
+        let chunkCount = 0;
+        for await (const value of response.body) {
+            chunkCount++;
+            if (chunkCount === 1) {
+                console.log(`[TTS] First data chunk arrived (${value.length} bytes)`);
+            }
+
+            buffer += value.toString();
             const lines = buffer.split('\n');
             buffer = lines.pop() || '';
             
@@ -551,7 +632,8 @@ async function streamWaveNetOnce(text, targetLang, sendDone){
                             sendToRenderer('tts-audio-chunk', new Uint8Array(audioBuffer));
                         }
                     } catch (e) {
-                        // Ignore malformed JSON lines
+                        // If parsing fails but we have audio content-type, it might be raw data after all
+                        console.warn('[TTS] Failed to parse JSON line from stream. Data might be raw binary.');
                     }
                 }
             }
@@ -563,18 +645,26 @@ async function streamWaveNetOnce(text, targetLang, sendDone){
         sendToRenderer('log-message', `Backend TTS streaming: Phát thành công (${languageCode}).`, 'success');
 
     } catch (e) {
-        sendToRenderer('log-message', `Lỗi kết nối/gọi Backend TTS: ${e.message}`, 'error');
-        console.error('Backend TTS Error:', e);
+        const errorMsg = e.message.includes('500') 
+            ? `Backend TTS service error. Please check backend status and logs.`
+            : `Lỗi kết nối/gọi Backend TTS: ${e.message}`;
+        sendToRenderer('log-message', errorMsg, 'error');
+        console.error('[TTS] Error streaming audio:', {
+            text: text.substring(0, 50),
+            language: targetLang,
+            error: e.message,
+            stack: e.stack
+        });
     }
 }
 
-async function callGoogleWaveNetChunkedTTSService(text, targetLang){
-    const segments = splitIntoSegments(text || '');
-    if (segments.length === 0) return;
-    for (let idx = 0; idx < segments.length; idx++){
+async function callGoogleWaveNetChunkedTTSService(text, targetLang) {
+    const segments = splitIntoSegments(text || '', 100); 
+    console.log(`[TTS] Text split into ${segments.length} natural segments for sequential playback.`);
+    
+    for (let idx = 0; idx < segments.length; idx++) {
         const isLast = idx === segments.length - 1;
-        // do not await each; start next quickly to reduce perceived gap
-        // eslint-disable-next-line no-await-in-loop
+        // Await each segment to ensure sequential order
         await streamWaveNetOnce(segments[idx], targetLang, isLast);
     }
 }
@@ -755,10 +845,31 @@ function initWebSocketSTT(sourceLangCode, targetLangCode, sampleRate, token) {
     console.log(`[STT] Handshake Params: source=${sourceLangCode}, target=${sanitizedTargetLang}, rate=${sampleRate}`);
     state.wsSTT = new WebSocket(url);
 
+    // Heartbeat mechanism to prevent idle timeouts
+    let heartbeatTimer = null;
+    const startHeartbeat = () => {
+        if (heartbeatTimer) clearInterval(heartbeatTimer);
+        heartbeatTimer = setInterval(() => {
+            if (state.wsSTT && state.wsSTT.readyState === WebSocket.OPEN) {
+                state.wsSTT.send(JSON.stringify({ type: 'ping' }));
+            }
+        }, 5000); // Every 5 seconds
+    };
+
+    const stopHeartbeat = () => {
+        if (heartbeatTimer) {
+            clearInterval(heartbeatTimer);
+            heartbeatTimer = null;
+        }
+    };
+
     state.wsSTT.on('open', () => {
-        console.log(`[STT] WebSocket Connected to ${config.BACKEND_URL}`);
+        console.log("WS OPEN");
         state.wsReconnectAttempts = 0;
         sendToRenderer('log-message', `WebSocket STT: Đã kết nối. Target: ${sanitizedTargetLang}`, 'success');
+        
+        startHeartbeat();
+
         state.wsSTT.send(JSON.stringify({
             type: 'stt_start',
             payload: {
@@ -784,11 +895,25 @@ function initWebSocketSTT(sourceLangCode, targetLangCode, sampleRate, token) {
                 const translation = payload.translation || payload.translated_text || '';
                 const isFinal = (payload.isFinal !== undefined) ? payload.isFinal : (payload.is_final || false);
                 
+                // --- UUID Normalization ---
+                // If backend sends an internal UUID, promote it to our primary ID
+                if (payload.user_id && payload.user_id.includes('-') && payload.user_id.length > 20) {
+                    if (config.CYAN_USER_ID !== payload.user_id) {
+                        console.log(`[MAIN] Normalizing ID: Promoting Google ID to internal UUID: ${payload.user_id}`);
+                        config.CYAN_USER_ID = payload.user_id;
+                    }
+                }
+                
                 if (transcript) {
                     console.log(`[STT WS] Transcript: "${transcript}" (${isFinal ? 'Final' : 'Partial'})`);
                     
                     // Renderer expects 'stt-transcript' NOT 'stt-result'
                     sendToRenderer('stt-transcript', { transcript, isFinal });
+                    
+                    // Add a log that the user can see in the UI
+                    if (isFinal) {
+                        sendToRenderer('log-message', `[STT] Sentence Finalized: "${transcript}"`, 'success');
+                    }
 
                     // Update UI translation feed if translation is present (even for partials)
                     if (translation) {
@@ -805,13 +930,14 @@ function initWebSocketSTT(sourceLangCode, targetLangCode, sampleRate, token) {
 
                         if (translation) {
                             console.log(`[STT WS] Translation final: "${translation}"`);
-                            sendToRenderer('log-message', `Nhận được bản dịch từ backend: ${transcript} -> ${translation}`, 'success');
+                            sendToRenderer('log-message', `[Cloud TTS] Triggering for: "${translation.substring(0, 30)}..." using ${engine}`, 'info');
                             
                             // Trigger TTS with pre-translated text
                             enqueueTts(transcript, targetLang, engine, translation);
                         } else {
                             // Fallback if no translation returned - local translate will be triggered
                             console.log(`[STT WS] Final transcript received (no translation): "${transcript}"`);
+                            sendToRenderer('log-message', `[Cloud TTS] Triggering (no pre-translation) for: "${transcript.substring(0, 30)}..."`, 'warning');
                             enqueueTts(transcript, targetLang, engine);
                         }
                     }
@@ -843,11 +969,14 @@ function initWebSocketSTT(sourceLangCode, targetLangCode, sampleRate, token) {
 
     state.wsSTT.on('error', (err) => {
         console.error('[STT] WebSocket Error:', err.message);
+        if (err.code) console.error('[STT] Error Code:', err.code);
         sendToRenderer('log-message', `Lỗi kết nối WebSocket: ${err.message}`, 'error');
     });
 
-    state.wsSTT.on('close', () => {
-        console.log('[STT] WebSocket closed');
+    state.wsSTT.on('close', (code, reason) => {
+        console.log("WS CLOSE", code);
+        stopHeartbeat();
+
         if (state.isStreaming && state.wsReconnectAttempts < config.MAX_WS_RECONNECT_ATTEMPTS) {
             const delay = Math.min(1000 * Math.pow(2, state.wsReconnectAttempts), 10000);
             const targetLang = state.currentSettings.targetLang;
@@ -963,7 +1092,8 @@ function endBackendStream() {
     audioChunkLogCounter = 0;
 }
 
-function stopStream() {
+function stopStream(reason = 'unknown') {
+    console.log(`[STT] Stopping stream. Reason: ${reason}`);
     if (state.wsSTT) {
         try { 
             state.wsSTT.send(JSON.stringify({ type: 'stt_stop' })); 
@@ -1001,7 +1131,7 @@ function stopStream() {
 
 ipcMain.on('audio-chunk', (event, chunk) => {
     if (!validateIPC('audio-chunk', chunk)) return;
-    if (state.isStreaming && !state.sttFinalizing) {
+    if (state.isStreaming) {
         let buf = null;
         if (Buffer.isBuffer(chunk)) {
             buf = chunk;
@@ -1061,12 +1191,12 @@ ipcMain.on('translation:toggle', (event, data) => {
                 return;
             }
             sendToRenderer('log-message', `[MAIN PROCESS] Đã nhận lệnh STOP.`, 'info'); 
-            stopStream();
+            stopStream('UI_TOGGLE_OFF');
         }
     } catch (error) {
         console.error(`[FATAL IPC ERROR IN translation:toggle]`, error);
         sendToRenderer('log-message', `LỖI CẤP CAO (IPC): Không thể xử lý luồng dịch thuật.`, 'error'); 
-        stopStream();
+        stopStream('FATAL_IPC_ERROR');
     }
 });
 
@@ -1084,13 +1214,14 @@ ipcMain.on('overlay:hide', () => {
 
 ipcMain.on('stt:finalize', () => {
     try {
-        if (state.isStreaming && !state.sttFinalizing) {
+        if (state.isStreaming) {
             state.sttFinalizing = true;
-            // For WebSocket, we could send a specific flag if the backend supports it,
-            // but usually we just wait for the silence-based final result.
-            // If we want to FORCE finalization, we might close the WS, 
-            // but that stops the whole session.
-            console.log('[STT] Finalize requested (waiting for backend to finalize on silence)');
+            // Send finalize message to backend if using WebSocket
+            if (state.wsSTT && state.wsSTT.readyState === WebSocket.OPEN) {
+                state.wsSTT.send(JSON.stringify({ type: 'finalize' }));
+                console.log('[STT] Sent finalize to backend');
+            }
+            console.log('[STT] Finalize requested (hint sent to backend)');
         }
     } catch (e) {
         logger.error('STT', 'Failed during STT finalize', e);

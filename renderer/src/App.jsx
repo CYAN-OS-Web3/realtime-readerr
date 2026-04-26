@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { useStore } from './store/useStore';
 import { useAudioPipeline } from './hooks/useAudioPipeline';
 import { useTranslationFeed } from './hooks/useTranslationFeed';
@@ -91,7 +91,16 @@ class ErrorBoundary extends React.Component {
                     <p className="text-red-400 font-mono text-xs max-w-md bg-black/40 p-4 rounded-lg border border-red-900/30 whitespace-pre-wrap">
                         {this.state.error?.toString()}
                     </p>
-                    <button onClick={() => window.location.reload()} className="mt-8 px-6 py-2 bg-gray-900 border border-gray-800 rounded-full text-xs font-bold text-gray-400 hover:text-white transition-all uppercase tracking-widest">
+                    <button
+                        onClick={() => {
+                            if (typeof this.props.onReset === 'function') {
+                                this.props.onReset();
+                                return;
+                            }
+                            window.location.reload();
+                        }}
+                        className="mt-8 px-6 py-2 bg-gray-900 border border-gray-800 rounded-full text-xs font-bold text-gray-400 hover:text-white transition-all uppercase tracking-widest"
+                    >
                         Refresh Application
                     </button>
                 </div>
@@ -157,9 +166,11 @@ const AppShell = () => {
 };
 
 export default function App() {
+    const [resetToken, setResetToken] = React.useState(0);
+
     return (
-        <ErrorBoundary>
-            <AppShell />
+        <ErrorBoundary onReset={() => setResetToken((value) => value + 1)}>
+            <AppShell key={resetToken} />
         </ErrorBoundary>
     );
 }

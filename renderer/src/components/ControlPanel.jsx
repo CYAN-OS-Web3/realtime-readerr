@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Settings, Play, Square, Volume2, Mic, Activity } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { ipcService } from '../services/ipcService';
@@ -38,12 +38,26 @@ export const ControlPanel = () => {
                 setIsTranslating(false);
             }
         } else {
+            console.log("Sending STOP");
             ipcService.toggleTranslation({ isTranslating: false });
             ipcService.hideOverlay();
             setIsTranslating(false);
             addLog('Đã dừng dịch.', 'info');
         }
     };
+
+    // Listen for Escape key to stop translation
+    useEffect(() => {
+        const handleKeyDown = (e) => {
+            if (e.key === 'Escape' && isTranslating) {
+                console.log("Escape key pressed - stopping translation");
+                toggleTranslation();
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [isTranslating]);
 
     return (
         <div className="flex-1 flex flex-col p-4 space-y-5 overflow-y-auto custom-scrollbar">

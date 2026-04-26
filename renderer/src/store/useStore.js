@@ -55,8 +55,10 @@ export const useStore = create((set) => ({
   isConnected: false,
   latency: 0,
   backendUrl: '',
+  wsConnectionState: 'disconnected', // 'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'failed'
   setConnection: (connected, latency) => set({ isConnected: connected, latency }),
   setBackendUrl: (url) => set({ backendUrl: url }),
+  setWSConnectionState: (state) => set({ wsConnectionState: state }),
   
   // --- Devices ---
   audioInputs: [],
