@@ -279,6 +279,21 @@ export const useTranslationFeed = () => {
         const unsubTranslation = ipcService.onTranslationUpdate((data) => {
             useStore.getState().updateLastTranscript({ source: data.sourceText, target: data.translatedText, isFinal: true });
             
+            // Capture final transcripts to session for later submission to Go Backend
+            if (data.sourceText && data.translatedText) {
+                useStore.getState().addFinalTranscript({
+                    source: data.sourceText,
+                    target: data.translatedText,
+                    isFinal: true,
+                    timestamp: new Date().toISOString() // ISO format for Go Backend
+                });
+                console.log('[Session] Captured final transcript:', {
+                    source: data.sourceText.substring(0, 50),
+                    target: data.translatedText.substring(0, 50),
+                    timestamp: new Date().toISOString()
+                });
+            }
+            
             // Delay local TTS for 1 second so cloud audio can arrive first.
             // If cloud audio starts within that window, the timer is cleared.
             if (data.translatedText && data.translatedText !== lastTranslationRef.current) {

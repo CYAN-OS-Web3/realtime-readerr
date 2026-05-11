@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { MessageSquare, Mic2, FileText, Activity, ChevronLeft, ChevronRight, PanelsTopLeft } from 'lucide-react';
+import { MessageSquare, Mic2, FileText, Activity, ChevronLeft, ChevronRight, PanelsTopLeft, Sparkles, Terminal } from 'lucide-react';
 import { useStore } from '../store/useStore';
 
 export const Sidebar = () => {
@@ -18,8 +18,9 @@ export const Sidebar = () => {
 
     const menuItems = [
         { id: 'translation', icon: MessageSquare, label: 'Translation' },
+        { id: 'summaries', icon: Sparkles, label: 'Summaries' },
         { id: 'voice', icon: Mic2, label: 'Voice Manager' },
-        { id: 'logs', icon: FileText, label: 'System Logs' },
+        { id: 'logs', icon: Terminal, label: 'System Logs' },
     ];
 
     return (
@@ -66,6 +67,7 @@ export const Sidebar = () => {
                                         </div>
                                         <p className="mt-1 truncate text-[10px] text-gray-500">
                                             {item.id === 'translation' && 'Main live translation workspace'}
+                                            {item.id === 'summaries' && 'Review AI-generated session summaries'}
                                             {item.id === 'voice' && 'Voice cloning and payment workflow'}
                                             {item.id === 'logs' && 'System events and pipeline status'}
                                         </p>

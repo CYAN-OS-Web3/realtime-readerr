@@ -82,7 +82,7 @@ export const useStore = create((set) => ({
   setMicVolume: (vol) => set({ micVolume: vol }),
   
   // --- UI States ---
-  activeTab: 'translation', // 'translation' | 'voice' | 'logs'
+  activeTab: 'translation', // 'translation' | 'voice' | 'logs' | 'summaries'
   setActiveTab: (tab) => set({ activeTab: tab }),
   showOverlay: true,
   showConfigModal: false,
@@ -92,6 +92,20 @@ export const useStore = create((set) => ({
   setShowConfigModal: (val) => set({ showConfigModal: val }),
   setConfigStep: (val) => set({ configStep: val }),
   setIsConfiguring: (val) => set({ isConfiguring: val }),
+
+  // --- Toast Notifications ---
+  toast: {
+    show: false,
+    status: 'idle', // 'idle' | 'generating' | 'complete'
+    title: '',
+    message: ''
+  },
+  setToast: (toastUpdate) => set((state) => ({ 
+    toast: { ...state.toast, ...toastUpdate } 
+  })),
+  hideToast: () => set((state) => ({ 
+    toast: { ...state.toast, show: false } 
+  })),
 
   // --- Voice Management ---
   voiceOrderId: '',
@@ -145,6 +159,34 @@ export const useStore = create((set) => ({
     return { transcripts: newTranscripts };
   }),
   clearTranscripts: () => set({ transcripts: [] }),
+
+  // --- Session Transcripts (Final only) ---
+  sessionTranscripts: [],
+  sessionId: null,
+  startSession: (id) => set({ 
+    sessionId: id || `session_${Date.now()}`,
+    sessionTranscripts: []
+  }),
+  addFinalTranscript: (finalTranscript) => set((state) => ({
+    sessionTranscripts: [...state.sessionTranscripts, {
+      source: finalTranscript.source,
+      target: finalTranscript.target,
+      isFinal: finalTranscript.isFinal || true,
+      timestamp: finalTranscript.timestamp || new Date().toISOString(),
+      sessionId: state.sessionId,
+      capturedAt: Date.now()
+    }]
+  })),
+  getSessionTranscripts: () => {
+    const state = useStore.getState();
+    return {
+      sessionId: state.sessionId,
+      transcripts: state.sessionTranscripts,
+      count: state.sessionTranscripts.length,
+      startedAt: state.sessionId ? parseInt(state.sessionId.split('_')[1]) : null
+    };
+  },
+  clearSessionTranscripts: () => set({ sessionTranscripts: [], sessionId: null }),
 
   // --- Logs ---
   logs: [],
