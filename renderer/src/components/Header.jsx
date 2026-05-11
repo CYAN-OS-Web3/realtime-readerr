@@ -29,7 +29,8 @@ export const Header = () => {
             setAuthUserId(manualId);
             setInstallId(manualId);
             localStorage.setItem('installId', manualId);
-            addLog('Dev Bypass: Authenticated as ' + manualId, 'warn');
+            localStorage.setItem('cyan_token', 'dev-bypass-token-' + manualId);
+            addLog('Dev Bypass: Authenticated as ' + manualId + ' (Token bypassed)', 'warn');
             return;
         }
 

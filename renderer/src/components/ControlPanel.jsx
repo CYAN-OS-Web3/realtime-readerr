@@ -1,7 +1,8 @@
-import React, { useEffect } from 'react';
-import { Settings, Play, Square, Volume2, Mic, Activity } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Settings, Play, Square, Volume2, Mic, Activity, SparkleIcon, Wand2Icon } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { ipcService } from '../services/ipcService';
+import { goBackendService } from '../services/summarizeService';
 
 export const ControlPanel = () => {
     const { 
@@ -12,14 +13,30 @@ export const ControlPanel = () => {
         audioInputs,
         audioOutputs,
         addLog,
-        setShowConfigModal
+        setShowConfigModal,
+        startSession,
+        getSessionTranscripts,
+        clearSessionTranscripts,
+        authUserId,
+        setToast,
+        hideToast
     } = useStore();
+
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [sessionEnded, setSessionEnded] = useState(false);
+    const [summaryResult, setSummaryResult] = useState(null);
 
     const toggleTranslation = async () => {
         const newState = !isTranslating;
         
         if (newState) {
             try {
+                // Start a new session
+                startSession();
+                setSessionEnded(false);
+                setSummaryResult(null);
+                addLog('🟢 Session started', 'info');
+                
                 const targetShort = settings.targetLang.split('-')[0];
                 ipcService.toggleTranslation({
                     isTranslating: true,
@@ -38,12 +55,136 @@ export const ControlPanel = () => {
                 setIsTranslating(false);
             }
         } else {
-            console.log("Sending STOP");
-            ipcService.toggleTranslation({ isTranslating: false });
-            ipcService.hideOverlay();
-            setIsTranslating(false);
-            addLog('Đã dừng dịch.', 'info');
+            try {
+                console.log("Sending STOP");
+                ipcService.toggleTranslation({ isTranslating: false });
+                ipcService.hideOverlay();
+                setIsTranslating(false);
+                setSessionEnded(true);
+                
+                // Get final transcripts
+                const sessionData = getSessionTranscripts();
+                
+                if (sessionData.transcripts.length > 0) {
+                    addLog(`⏹️ Session stopped. Captured ${sessionData.transcripts.length} transcripts.`, 'info');
+                    addLog(`💡 Click "Give Summary" to summarize the conversation.`, 'info');
+                    
+                    // Automatically check if a summary already exists for this session ID
+                    try {
+                        const existing = await goBackendService.getStoredSummary(sessionData.sessionId);
+                        if (existing) {
+                            setSummaryResult(existing);
+                            addLog('📋 Restored summary from database', 'success');
+                        }
+                    } catch (e) {
+                        console.warn('[Summarizer] Failed to check for existing summary');
+                    }
+                } else {
+                    addLog('⏹️ Session stopped. No transcripts captured.', 'info');
+                    clearSessionTranscripts();
+                }
+            } catch (err) {
+                console.error("Stop failed:", err);
+                addLog('❌ Error stopping session', 'error');
+            }
         }
+    };
+    const handleGiveSummary = async () => {
+        try {
+            if (!authUserId) {
+                setToast({
+                    show: true,
+                    status: 'warning',
+                    title: 'Account Required',
+                    message: 'Please connect your account in the header first to generate AI summaries.'
+                });
+                setTimeout(() => hideToast(), 3000);
+                return;
+            }
+
+            const sessionData = getSessionTranscripts();
+            
+            if (sessionData.transcripts.length === 0) {
+                addLog('⚠️ No transcripts to summarize', 'warning');
+                return;
+            }
+
+            // Show 'Generating' toast for 3 seconds via global store
+            setToast({
+                show: true,
+                status: 'generating',
+                title: 'Generating Session Summary',
+                message: 'Processing conversation intelligence in background...'
+            });
+
+            setTimeout(() => {
+                // Only hide if we haven't completed yet
+                const currentToast = useStore.getState().toast;
+                if (currentToast.status === 'generating') {
+                    hideToast();
+                }
+            }, 3000);
+
+            addLog(`📤 Requesting summary for ${sessionData.transcripts.length} transcripts...`, 'info');
+            
+            try {
+                // Get the user ID (fallback to installId if authUserId not set)
+                const userId = authUserId || localStorage.getItem('installId') || 'anonymous';
+                const token = localStorage.getItem('cyan_token') || '';
+
+                const result = await goBackendService.requestSummarization({
+                    sessionId: sessionData.sessionId,
+                    userId: userId,
+                    transcripts: sessionData.transcripts,
+                    sourceLang: settings.sourceLang,
+                    targetLang: settings.targetLang,
+                    token: token
+                });
+
+                // Parse response
+                const title = result.summary_title || 'Session Summary';
+                
+                // --- NEW: Fetch from DB to confirm storage ---
+                const storedRecord = await goBackendService.getStoredSummary(sessionData.sessionId, token);
+                
+                if (storedRecord) {
+                    setSummaryResult(storedRecord);
+                } else {
+                    setSummaryResult(result);
+                }
+                
+                // Show success toast via global store
+                setToast({
+                    show: true,
+                    status: 'complete',
+                    title: 'Summarization Complete',
+                    message: title || 'Conversation summary is ready for review.'
+                });
+                
+                setTimeout(() => {
+                    hideToast();
+                }, 5000);
+                
+                addLog('✅ Summary generation complete', 'success');
+            } catch (apiError) {
+                console.error('Go Backend error:', apiError);
+                addLog(`❌ Failed to get summary: ${apiError.message}`, 'error');
+                setToast({ show: false });
+            }
+        } catch (err) {
+            console.error("Summary failed:", err);
+            addLog('❌ Error getting summary', 'error');
+            setToast({ show: false });
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    const handleClearSession = () => {
+        clearSessionTranscripts();
+        setSessionEnded(false);
+        setSummaryResult(null);
+        addLog('Session cleared', 'info');
     };
 
     // Listen for Escape key to stop translation
@@ -65,16 +206,22 @@ export const ControlPanel = () => {
             <div className="relative group">
                 <button
                     onClick={toggleTranslation}
-                    className={`w-full py-5 rounded-2xl flex flex-col items-center justify-center gap-1.5 transition-all duration-500 transform active:scale-95 z-10 relative ${
+                    disabled={isSubmitting}
+                    className={`w-full py-5 rounded-2xl flex flex-col items-center justify-center gap-1.5 transition-all duration-500 transform active:scale-95 z-10 relative disabled:opacity-50 disabled:cursor-not-allowed ${
                         isTranslating
                             ? 'bg-red-500/10 border border-red-500/50 text-red-500 shadow-[0_0_30px_rgba(239,68,68,0.2)]'
                             : 'bg-cyan-500 border border-cyan-400 text-black shadow-[0_0_30px_rgba(6,182,212,0.3)]'
                     }`}
                 >
-                    {isTranslating ? (
+                    {isSubmitting ? (
+                        <>
+                            <div className="w-5 h-5 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
+                            <span className="text-[10px] font-black tracking-[0.2em] uppercase">Processing...</span>
+                        </>
+                    ) : isTranslating ? (
                         <>
                             <Square className="w-5 h-5 fill-red-500" />
-                            <span className="text-[10px] font-black tracking-[0.2em] uppercase">STOP SERVICE</span>
+                            <span className="text-[10px] font-black tracking-[0.2em] uppercase">STOP SESSION</span>
                         </>
                     ) : (
                         <>
@@ -87,6 +234,43 @@ export const ControlPanel = () => {
                     <div className="absolute inset-0 bg-red-500/10 blur-xl animate-pulse -z-10 rounded-2xl" />
                 )}
             </div>
+
+            {/* Summary Actions (shown after session ends) */}
+            {sessionEnded && !isTranslating && (
+                <div className="space-y-3">
+                    <button
+                        onClick={handleGiveSummary}
+                        disabled={isSubmitting}
+                        className={`w-full py-4 rounded-2xl flex flex-col items-center justify-center gap-1.5 transition-all duration-300 transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed border shadow-[0_0_30px_rgba(34,197,94,0.1)] ${
+                            authUserId 
+                                ? 'bg-green-500/10 border-green-500/50 text-green-400 hover:bg-green-500/20' 
+                                : 'bg-gray-800/20 border-gray-700/50 text-gray-500 grayscale opacity-60 hover:bg-gray-800/40'
+                        }`}
+                    >
+                        {isSubmitting ? (
+                            <>
+                                <div className="w-4 h-4 border-2 border-green-400 border-t-transparent rounded-full animate-spin" />
+                                <span className="text-[9px] font-black tracking-[0.2em] uppercase">Summarizing...</span>
+                            </>
+                        ) : (
+                            <div className="flex items-center gap-2">
+                                <span className="text-lg"><Wand2Icon/></span>
+                                <span className="text-[10px] font-black tracking-[0.2em] uppercase">Generate & Save Summary</span>
+                            </div>
+                        )}
+                    </button>
+                    
+
+
+                    <button
+                        onClick={handleClearSession}
+                        disabled={isSubmitting}
+                        className="w-full py-2.5 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-400 text-[9px] font-black tracking-widest uppercase transition-all disabled:opacity-50"
+                    >
+                        Clear Session
+                    </button>
+                </div>
+            )}
 
             {/* Language Pair */}
             <div className="space-y-3 p-3 bg-black/20 rounded-xl border border-gray-800/50">

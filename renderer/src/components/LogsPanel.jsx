@@ -1,5 +1,5 @@
 import React from 'react';
-import { Terminal, Trash2, Clock, Info, AlertTriangle, Bug } from 'lucide-react';
+import { Terminal, Trash2, Clock, Info, AlertTriangle, Bug, RefreshCw } from 'lucide-react';
 import { useStore } from '../store/useStore';
 
 export const LogsPanel = () => {
@@ -19,13 +19,32 @@ export const LogsPanel = () => {
                     </div>
                 </div>
 
-                <button 
-                    onClick={clearLogs}
-                    className="flex items-center gap-2 px-4 py-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 rounded-lg text-red-500 transition-all group"
-                >
-                    <Trash2 className="w-4 h-4" />
-                    <span className="text-[10px] font-black tracking-widest uppercase">Flush Buffer</span>
-                </button>
+                <div className="flex items-center gap-2">
+                    <button 
+                        onClick={() => {
+                            // Clear all cyan_ related storage
+                            Object.keys(localStorage).forEach(key => {
+                                if (key.startsWith('cyan_') || key === 'installId') {
+                                    localStorage.removeItem(key);
+                                }
+                            });
+                            window.location.reload();
+                        }}
+                        className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded-lg text-amber-500 transition-all group"
+                        title="Clear all local state and tokens"
+                    >
+                        <RefreshCw className="w-4 h-4 group-hover:rotate-180 transition-transform duration-500" />
+                        <span className="text-[10px] font-black tracking-widest uppercase">Hard Reset</span>
+                    </button>
+
+                    <button 
+                        onClick={clearLogs}
+                        className="flex items-center gap-2 px-4 py-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 rounded-lg text-red-500 transition-all group"
+                    >
+                        <Trash2 className="w-4 h-4" />
+                        <span className="text-[10px] font-black tracking-widest uppercase">Flush Buffer</span>
+                    </button>
+                </div>
             </div>
 
             {/* Logs Window */}

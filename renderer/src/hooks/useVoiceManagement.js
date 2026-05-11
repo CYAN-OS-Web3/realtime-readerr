@@ -34,7 +34,7 @@ export const useVoiceManagement = () => {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    ...(token ? { 'x-cyan-token': token } : {})
+                    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
                 },
                 body: JSON.stringify({ user_id: uid, device_id: uid })
             });
@@ -97,7 +97,9 @@ export const useVoiceManagement = () => {
 
             const response = await fetch(`${base}/api/voice/update/complete`, {
                 method: 'POST',
-                headers: token ? { 'x-cyan-token': token } : {},
+                headers: {
+                    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+                },
                 body: formData
             });
 
