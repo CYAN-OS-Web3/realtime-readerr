@@ -13,8 +13,8 @@ const piperCache = new PiperCache(2); // Keep max 2 models in memory
 const config = require('./config');
 const { state, resetSTTState, updateSettings, getSettings } = require('./state-manager');
 
-// FORCED DEV MODE FOR DIAGNOSTICS
-const isDev = true; 
+// Use config to determine dev mode
+const isDev = config.IS_DEV; 
 
 const defaultUserData = app.getPath('userData');
 const customUserData = path.join(defaultUserData, 'CyanDev');
@@ -361,147 +361,199 @@ function httpsJsonPost(urlStr, payload) {
 }
 
 async function callElevenLabsTTSService(text, targetLang) {
-    const userId = getInstallId();
-    const languageCode = normalizeLang(targetLang);
-    const token = state.currentSettings?.token || '';
-    
-    return new Promise((resolve, reject) => {
-        try {
-            // Use speak-stream for lower latency (MP3 streaming)
-            const u = new URL(`${config.BACKEND_URL}/api/v1/tts/speak-stream`);
-            const body = JSON.stringify({ 
-                user_id: userId, 
-                device_id: userId, 
-                text, 
-                language: languageCode, 
-                gender: 'female', 
-                tts_engine: 'elevenlabs',
-                provider: 'elevenlabs' 
-            });
+    try {
+        const languageCode = normalizeLang(targetLang);
+        const token = state.currentSettings?.token || '';
+        
+        if (!text || text.trim().length === 0) {
+            console.warn('[TTS] Empty text, skipping ElevenLabs TTS call');
+            sendToRenderer('tts-audio-done');
+            return;
+        }
 
-            const headers = {
-                'Content-Type': 'application/json',
-                'Content-Length': Buffer.byteLength(body)
-            };
+        console.log(`🔊 Calling Backend ElevenLabs TTS API: "${text.substring(0, 30)}..." -> ${languageCode}`);
+        
+        const headers = {
+            'Content-Type': 'application/json'
+        };
 
-            if (token) {
-                headers['Authorization'] = `Bearer ${token}`;
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+        }
+
+        const requestBody = {
+            user_id: getInstallId(),
+            device_id: getInstallId(),
+            text: text,
+            language: languageCode,
+            gender: 'female',
+            tts_engine: 'elevenlabs',
+            provider: 'elevenlabs'
+        };
+
+        const response = await fetch(`${config.BACKEND_URL}/api/v1/tts/speak-stream`, {
+            method: 'POST',
+            signal: AbortSignal.timeout(30000),
+            headers: headers,
+            body: JSON.stringify(requestBody)
+        });
+
+        if (!response.ok) {
+            let errorDetail = '';
+            try {
+                const errorBody = await response.text();
+                errorDetail = errorBody.substring(0, 200);
+            } catch (e) {}
+
+            if (response.status === 401 || response.status === 403) {
+                sendToRenderer('log-message', `Phiên làm việc hết hạn (401). Vui lòng đăng nhập lại ứng dụng Cyan để tiếp tục.`, 'error');
+                return;
             }
 
-            const req = https.request({
-                hostname: u.hostname,
-                port: u.port ? Number(u.port) : 443,
-                path: u.pathname + (u.search || ''),
-                method: 'POST',
-                headers: headers,
-                timeout: 30000 
-            }, (res) => {
-                const status = res.statusCode || 0;
-                
-                if (status === 401 || status === 403) {
-                    sendToRenderer('log-message', `Phiên làm việc hết hạn (401). Vui lòng đăng nhập lại ứng dụng Cyan để tiếp tục.`, 'error');
-                    resolve(); // Resolve to unblock queue but don't play
-                    return;
-                }
-
-                if (status !== 200) {
-                    const err = [];
-                    res.on('data', (c) => err.push(c));
-                    res.on('end', () => {
-                        const txt = Buffer.concat(err).toString('utf8');
-                        sendToRenderer('log-message', `Backend ElevenLabs stream lỗi (HTTP ${status}): ${txt}`, 'error');
-                        resolve();
-                    });
-                    return;
-                }
-                
-                // Handle streaming JSON lines
-                let buffer = '';
-                res.on('data', (c) => {
-                    buffer += c.toString();
-                    const lines = buffer.split('\n');
-                    buffer = lines.pop() || '';
-                    
-                    for (const line of lines) {
-                        if (line.trim()) {
-                            try {
-                                const data = JSON.parse(line);
-                                if (data.audio) {
-                                    const audioBuffer = Buffer.from(data.audio, 'base64');
-                                    sendToRenderer('tts-audio-chunk', new Uint8Array(audioBuffer));
-                                }
-                            } catch (e) {
-                                // Ignore malformed JSON lines
-                            }
-                        }
-                    }
-                });
-                
-                res.on('end', () => {
-                    sendToRenderer('tts-audio-done');
-                    sendToRenderer('log-message', `ElevenLabs TTS streaming: Phát thành công (${languageCode}).`, 'success');
-                    resolve();
-                });
-            });
-
-            req.on('error', (e) => {
-                sendToRenderer('log-message', `Lỗi gọi Backend ElevenLabs stream: ${e.message}`, 'error');
-                resolve(); // Resolve to allow next queue item
-            });
-            
-            req.write(body);
-            req.end();
-        } catch (e) {
-            sendToRenderer('log-message', `Lỗi gọi Backend ElevenLabs TTS: ${e && e.message ? e.message : 'unknown'}`, 'error');
-            resolve();
+            throw new Error(`Backend ElevenLabs TTS error ${response.status}${errorDetail ? ': ' + errorDetail : ''}`);
         }
-    });
+
+        const contentType = response.headers.get('content-type') || '';
+        
+        if (contentType.includes('audio/')) {
+            console.log('[TTS] Handling raw binary audio stream from ElevenLabs');
+            const arrayBuffer = await response.arrayBuffer();
+            const buffer = Buffer.from(arrayBuffer);
+            sendToRenderer('tts-audio-chunk', new Uint8Array(buffer));
+            sendToRenderer('tts-audio-done');
+            return;
+        }
+
+        // JSON lines streaming fallback
+        let buffer = '';
+        for await (const value of response.body) {
+            buffer += value.toString();
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            
+            for (const line of lines) {
+                if (line.trim()) {
+                    try {
+                        const data = JSON.parse(line);
+                        if (data.audio) {
+                            const audioBuffer = Buffer.from(data.audio, 'base64');
+                            sendToRenderer('tts-audio-chunk', new Uint8Array(audioBuffer));
+                        }
+                    } catch (e) {
+                        // ignore malformed JSON lines
+                    }
+                }
+            }
+        }
+        
+        sendToRenderer('tts-audio-done');
+        sendToRenderer('log-message', `ElevenLabs TTS streaming: Phát thành công (${languageCode}).`, 'success');
+
+    } catch (e) {
+        sendToRenderer('log-message', `Lỗi gọi Backend ElevenLabs TTS: ${e.message}`, 'error');
+        console.error('[TTS] ElevenLabs Error:', e);
+    }
 }
 
 async function callAzureTTSService(text, targetLang) {
-    const languageCode = normalizeLang(targetLang);
-    if (!azureKey || !azureRegion) {
-        // fallback to backend streaming if no key
-        return streamWaveNetOnce(text, targetLang, true);
-    }
-    let synthesizer = null;
     try {
-        const speechConfig = sdk.SpeechConfig.fromSubscription(azureKey, azureRegion);
-        speechConfig.speechSynthesisLanguage = languageCode;
-        speechConfig.speechSynthesisVoiceName = getAzureVoiceName(targetLang);
-        speechConfig.setProperty(
-            sdk.PropertyId.SpeechServiceConnection_SynthOutputFormat,
-            sdk.SpeechSynthesisOutputFormat.Raw16Khz16BitMonoPcm
-        );
+        const languageCode = normalizeLang(targetLang);
+        const token = state.currentSettings?.token || '';
+        
+        if (!text || text.trim().length === 0) {
+            console.warn('[TTS] Empty text, skipping Azure TTS call');
+            sendToRenderer('tts-audio-done');
+            return;
+        }
 
-        const pullStream = sdk.AudioOutputStream.createPullStream();
-        const audioConfig = sdk.AudioConfig.fromStreamOutput(pullStream);
-        synthesizer = new sdk.SpeechSynthesizer(speechConfig, audioConfig);
-
-        const readChunks = async () => {
-            while (true) {
-                const chunk = pullStream.read();
-                if (!chunk || chunk.length === 0) break;
-                sendToRenderer('tts-audio-chunk', new Uint8Array(chunk));
-            }
+        console.log(`🔊 Calling Backend Azure TTS API: "${text.substring(0, 30)}..." -> ${languageCode}`);
+        
+        const headers = {
+            'Content-Type': 'application/json'
         };
 
-        const donePromise = new Promise((resolve, reject) => {
-            synthesizer.synthesisCompleted = () => resolve();
-            synthesizer.canceled = (_s, e) => reject(new Error(e.errorDetails || 'azure_synthesis_canceled'));
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+        }
+
+        const requestBody = {
+            user_id: getInstallId(),
+            device_id: getInstallId(),
+            text: text,
+            language: languageCode,
+            gender: config.AZURE_PREFERRED_GENDER || 'female',
+            tts_engine: 'azure',
+            provider: 'azure',
+            voice_id: getAzureVoiceName(targetLang),
+            sample_rate_hertz: 16000
+        };
+
+        const response = await fetch(`${config.BACKEND_URL}/api/v1/tts/speak-stream`, {
+            method: 'POST',
+            signal: AbortSignal.timeout(30000),
+            headers: headers,
+            body: JSON.stringify(requestBody)
         });
 
-        synthesizer.startSpeakingTextAsync(text);
-        await donePromise;
-        await readChunks();
+        if (!response.ok) {
+            let errorDetail = '';
+            try {
+                const errorBody = await response.text();
+                errorDetail = errorBody.substring(0, 200);
+            } catch (e) {}
+
+            if (response.status === 401 || response.status === 403) {
+                sendToRenderer('log-message', `Phiên làm việc hết hạn (401). Vui lòng đăng nhập lại ứng dụng Cyan để tiếp tục.`, 'error');
+                return;
+            }
+
+            // Retry on 5xx errors up to 3 times
+            if (response.status >= 500) {
+                console.warn(`[TTS] Backend returned ${response.status}, but retry is not implemented in this flow. Please use streamWaveNetOnce style if you need retries.`);
+            }
+
+            throw new Error(`Backend Azure TTS error ${response.status}${errorDetail ? ': ' + errorDetail : ''}`);
+        }
+
+        const contentType = response.headers.get('content-type') || '';
+        
+        if (contentType.includes('audio/')) {
+            console.log('[TTS] Handling raw binary audio stream from Azure');
+            const arrayBuffer = await response.arrayBuffer();
+            const buffer = Buffer.from(arrayBuffer);
+            sendToRenderer('tts-audio-chunk', new Uint8Array(buffer));
+            sendToRenderer('tts-audio-done');
+            return;
+        }
+
+        // JSON lines streaming fallback
+        let buffer = '';
+        for await (const value of response.body) {
+            buffer += value.toString();
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            
+            for (const line of lines) {
+                if (line.trim()) {
+                    try {
+                        const data = JSON.parse(line);
+                        if (data.audio) {
+                            const audioBuffer = Buffer.from(data.audio, 'base64');
+                            sendToRenderer('tts-audio-chunk', new Uint8Array(audioBuffer));
+                        }
+                    } catch (e) {
+                        // ignore malformed JSON lines
+                    }
+                }
+            }
+        }
+        
         sendToRenderer('tts-audio-done');
         sendToRenderer('log-message', `Azure TTS streaming: Phát thành công (${languageCode}).`, 'success');
+
     } catch (e) {
-        sendToRenderer('log-message', `Lỗi Azure TTS streaming: ${e.message}`, 'error');
-    } finally {
-        try { synthesizer?.close(); } catch (e) {
-            logger.error('AzureTTS', 'Failed to close Azure synthesizer', e);
-        }
+        sendToRenderer('log-message', `Lỗi gọi Backend Azure TTS: ${e.message}`, 'error');
+        console.error('[TTS] Azure Error:', e);
     }
 }
 

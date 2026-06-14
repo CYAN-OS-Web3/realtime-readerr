@@ -325,7 +325,7 @@ export const ControlPanel = () => {
                         disabled={isTranslating}
                         className="w-full bg-gray-900 border border-gray-800 rounded-lg px-2.5 py-2.5 text-white text-[11px] focus:border-cyan-500 outline-none disabled:opacity-30"
                     >
-                        <option value="google">Google Cloud (Standard)</option>
+                        <option value="google">Google WaveNet (Standard)</option>
                         <option value="azure">Microsoft Azure (Neural)</option>
                         <option value="elevenlabs">ElevenLabs (HD Clone)</option>
                     </select>

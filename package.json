@@ -46,7 +46,7 @@
       "target": "nsis"
     }
   },
-  "author": "",
+  "author": "CyanOS",
   "license": "ISC",
   "dependencies": {
     "@deepgram/sdk": "^3.8.0",

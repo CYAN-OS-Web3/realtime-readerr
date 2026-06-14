@@ -36,6 +36,7 @@ export const Header = () => {
 
         setIsLoggingIn(true);
         addLog('Connecting to account...', 'info');
+        // const loginUrl = 'http://localhost:5174/login?autoOpenApp=1';
         const loginUrl = 'https://cyan-os-landingpage.vercel.app/login?autoOpenApp=1';
         try {
             const result = await ipcService.openExternal(loginUrl);

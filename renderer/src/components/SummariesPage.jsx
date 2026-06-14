@@ -22,6 +22,12 @@ export const SummariesPage = () => {
             const url = `${backendUrl}/api/v1/summarization/list?page=${page}&page_size=${pageSize}`;
 
             console.log(`[SummariesPage] Fetching summaries from: ${url}`);
+            console.log(`[SummariesPage] Auth Debug:`, {
+                hasToken: !!token,
+                tokenLength: token.length,
+                tokenPreview: token ? token.substring(0, 20) + '...' : 'NONE',
+                authUserId: authUserId
+            });
             
             const response = await fetch(url, {
                 method: 'GET',

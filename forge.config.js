@@ -18,6 +18,7 @@ module.exports = {
         certificateFile: process.env.WINDOWS_CERTIFICATE_FILE,
         certificatePassword: process.env.WINDOWS_CERTIFICATE_PASSWORD,
         signingCertificate: process.env.WINDOWS_CERTIFICATE_FILE,
+        setupIcon: path.join(__dirname, 'assets/icon.ico'),
       },
     },
     {
