@@ -1094,6 +1094,7 @@ const ControlHub = () => {
                     localStorage.setItem('installId', manualId)
                     return
                   }
+                  // const loginUrl = 'http://localhost:5174/login?autoOpenApp=1';
 
                   const loginUrl = 'https://cyan-os-landingpage.vercel.app/login?autoOpenApp=1';
                   if (window.electronAPI?.openExternal) {

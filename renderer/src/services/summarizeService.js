@@ -90,7 +90,13 @@ export const goBackendService = {
 
       // Get JWT token for authorization
       const token = sessionData.token || localStorage.getItem('cyan_token') || '';
-      console.log(token);
+      console.log('[Summarizer] Token Debug:', {
+        hasToken: !!token,
+        tokenLength: token.length,
+        tokenPreview: token ? token.substring(0, 30) + '...' : 'NONE',
+        fromSessionData: !!sessionData.token,
+        fromLocalStorage: !!localStorage.getItem('cyan_token')
+      });
       console.log('[Summarizer] Network Details:', {
         url: endpoint,
         authHeader: token ? `Bearer ${token.substring(0, 10)}...` : 'None (UNAUTHORIZED RISK)',
