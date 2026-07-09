@@ -86,10 +86,12 @@ export const useStore = create((set) => ({
   setActiveTab: (tab) => set({ activeTab: tab }),
   showOverlay: true,
   showConfigModal: false,
+  showProfileModal: false,
   configStep: 0,
   isConfiguring: false,
   setShowOverlay: (val) => set({ showOverlay: val }),
   setShowConfigModal: (val) => set({ showConfigModal: val }),
+  setShowProfileModal: (val) => set({ showProfileModal: val }),
   setConfigStep: (val) => set({ configStep: val }),
   setIsConfiguring: (val) => set({ isConfiguring: val }),
 

@@ -12,7 +12,8 @@ export const Header = () => {
         setInstallId,
         addLog,
         wsConnectionState,
-        isTranslating
+        isTranslating,
+        setShowProfileModal
     } = useStore();
 
     const handleLogout = () => {
@@ -108,12 +109,21 @@ export const Header = () => {
             <div className="flex items-center gap-6">
                 <div className="flex items-center gap-4">
                     {authUserId ? (
-                        <div className="flex items-center gap-3 bg-gray-900 border border-gray-800 rounded-full pl-1.5 pr-3 py-1 group hover:border-cyan-500/50 transition-all cursor-default">
+                        <div 
+                            onClick={() => setShowProfileModal(true)}
+                            className="flex items-center gap-3 bg-gray-900 border border-gray-800 rounded-full pl-1.5 pr-3 py-1 group hover:border-cyan-500/50 hover:bg-gray-800/80 transition-all cursor-pointer"
+                        >
                             <div className="w-6 h-6 rounded-full bg-cyan-500 flex items-center justify-center text-[10px] font-black text-black">
                                 {authUserId.slice(0,2).toUpperCase()}
                             </div>
                             <span className="text-[10px] font-bold text-gray-400 max-w-[100px] truncate">{authUserId}</span>
-                            <button onClick={handleLogout} className="p-1 text-gray-600 hover:text-red-400 transition-colors">
+                            <button 
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleLogout();
+                                }} 
+                                className="p-1 text-gray-600 hover:text-red-400 transition-colors"
+                            >
                                 <LogOut className="w-3.5 h-3.5" />
                             </button>
                         </div>

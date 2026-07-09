@@ -5,14 +5,14 @@
  */
 
 const DEFAULT_PYTHON_BACKEND_URL = 'http://localhost:8000';
-const DEFAULT_GO_BACKEND_URL = 'http://localhost:8080';
+const DEFAULT_GO_BACKEND_URL = 'https://translator-gateway.fly.dev/';
 
 export const goBackendService = {
   /**
    * Get the Go backend URL
    */
   getBackendUrl: () => {
-    return import.meta.env.VITE_GO_BACKEND_URL || localStorage.getItem('go_backend_url') || DEFAULT_GO_BACKEND_URL;
+    return DEFAULT_GO_BACKEND_URL;
   },
 
   /**

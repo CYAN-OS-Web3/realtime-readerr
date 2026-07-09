@@ -255,7 +255,7 @@ const ControlHub = () => {
 
     const initWebMode = () => {
       console.log('[App] Initializing in Web Mode (No Electron detected)');
-      const storedBackend = (localStorage.getItem('backendUrl') || 'https://translator-gateway.fly.dev').toString().trim().replace(/\/$/, '')
+      const storedBackend = (localStorage.getItem('backendUrl') || 'https://translator-gateway.fly.dev/').toString().trim().replace(/\/$/, '')
       setBackendUrl(storedBackend)
       let id = (localStorage.getItem('installId') || '').toString().trim()
       if (!id) {

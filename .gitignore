@@ -5,6 +5,7 @@ node_modules
 dist
 renderer/dist
 renderer/node_modules
+build-out
 .trae
 *.log
 .DS_Store

@@ -12,6 +12,7 @@ import { VoiceManager } from './components/VoiceManager';
 import { LogsPanel } from './components/LogsPanel';
 import { SummariesPage } from './components/SummariesPage';
 import { AutoConfigModal } from './components/AutoConfigModal';
+import { ProfileModal } from './components/ProfileModal';
 import { X, ExternalLink, Activity, Settings2, Loader2, CheckCircle2 } from 'lucide-react';
 
 const BubbleBackground = () => (
@@ -214,6 +215,7 @@ const AppShell = () => {
             <FloatingOverlay />
             
             {showConfigModal && <AutoConfigModal />}
+            <ProfileModal />
 
             {/* Global Floating Toast System */}
             {toast.show && (

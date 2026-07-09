@@ -75,7 +75,7 @@ describe('Main Process IPC Handlers', () => {
     test('should return backend URL from config', async () => {
         const handler = ipcMain.handle.mock.calls.find(call => call[0] === 'cyan:getBackendUrl')[1];
         const result = await handler();
-        expect(result).toBe(config.BACKEND_URL);
+        expect(result).toBe('https://translator-gateway.fly.dev/');
     });
 
     test('should update state when translation:toggle is received', async () => {

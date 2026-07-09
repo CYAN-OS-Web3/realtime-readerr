@@ -15,8 +15,7 @@
     },
     "github": {
       "command": "node",
-      "args": ["./node_modules/@modelcontextprotocol/server-github/dist/index.js"],
-      "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": "YOUR_GITHUB_TOKEN"}
+      "args": ["./node_modules/@modelcontextprotocol/server-github/dist/index.js"]
     },
     "git": {
       "command": "npx",
@@ -24,7 +23,7 @@
     },
     "supabase": {
       "command": "node",
-      "args": ["./node_modules/@supabase/mcp-server-supabase/dist/index.js", "--access-token", "YOUR_SUPABASE_TOKEN"]
+      "args": ["./node_modules/@supabase/mcp-server-supabase/dist/index.js"]
     },
     "cyan-sdk": {
       "command": "node",
