@@ -1,5 +1,5 @@
 import React from 'react';
-import { Globe, Minimize2, X, Wifi, WifiOff, LogOut, User } from 'lucide-react';
+import { Globe, Minimize2, X, Wifi, WifiOff, LogOut, User, ChevronDown } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { ipcService } from '../services/ipcService';
 
@@ -13,13 +13,26 @@ export const Header = () => {
         addLog,
         wsConnectionState,
         isTranslating,
-        setShowProfileModal
+        setShowProfileModal,
+        setActiveTab
     } = useStore();
+
+    const [showDropdown, setShowDropdown] = React.useState(false);
+
+    let displayName = authUserId;
+    try {
+        const uStr = localStorage.getItem('cyan_user');
+        if (uStr && uStr.startsWith('{')) {
+            const u = JSON.parse(uStr);
+            displayName = u.first_name || u.username || authUserId;
+        }
+    } catch (e) {}
 
     const handleLogout = () => {
         setAuthUserId(null);
         localStorage.removeItem('installId');
         localStorage.removeItem('cyan_token');
+        localStorage.removeItem('cyan_user');
         addLog('User signed out.', 'info');
     };
 
@@ -41,6 +54,7 @@ export const Header = () => {
         const loginUrl = 'https://cyan-os-landingpage.vercel.app/login?autoOpenApp=1';
         try {
             const result = await ipcService.openExternal(loginUrl);
+            console.log(result)
             if (result && result.ok) {
                 addLog('Authentication window opened. Please complete login in your browser.', 'info');
             } else {
@@ -109,23 +123,43 @@ export const Header = () => {
             <div className="flex items-center gap-6">
                 <div className="flex items-center gap-4">
                     {authUserId ? (
-                        <div 
-                            onClick={() => setShowProfileModal(true)}
-                            className="flex items-center gap-3 bg-gray-900 border border-gray-800 rounded-full pl-1.5 pr-3 py-1 group hover:border-cyan-500/50 hover:bg-gray-800/80 transition-all cursor-pointer"
-                        >
-                            <div className="w-6 h-6 rounded-full bg-cyan-500 flex items-center justify-center text-[10px] font-black text-black">
-                                {authUserId.slice(0,2).toUpperCase()}
-                            </div>
-                            <span className="text-[10px] font-bold text-gray-400 max-w-[100px] truncate">{authUserId}</span>
-                            <button 
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleLogout();
-                                }} 
-                                className="p-1 text-gray-600 hover:text-red-400 transition-colors"
+                        <div className="relative">
+                            <div 
+                                onClick={() => setShowDropdown(!showDropdown)}
+                                className="flex items-center gap-3 bg-gray-900 border border-gray-800 rounded-full pl-1.5 pr-3 py-1 group hover:border-cyan-500/50 hover:bg-gray-800/80 transition-all cursor-pointer select-none"
                             >
-                                <LogOut className="w-3.5 h-3.5" />
-                            </button>
+                                <div className="w-6 h-6 rounded-full bg-cyan-500 flex items-center justify-center text-[10px] font-black text-black">
+                                    {(displayName || '').slice(0,2).toUpperCase()}
+                                </div>
+                                <span className="text-[10px] font-bold text-gray-400 max-w-[100px] truncate">{displayName}</span>
+                                <ChevronDown className={`w-3.5 h-3.5 text-gray-500 group-hover:text-cyan-400 transition-all ${showDropdown ? 'rotate-180 text-cyan-400' : ''}`} />
+                            </div>
+                            
+                            {showDropdown && (
+                                <div className="absolute right-0 top-full mt-2 w-40 bg-gray-900 border border-gray-800 rounded-xl shadow-[0_0_30px_rgba(0,0,0,0.5)] overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-200">
+                                    <button 
+                                        onClick={() => {
+                                            setActiveTab('profile');
+                                            setShowDropdown(false);
+                                        }}
+                                        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/5 transition-colors text-left"
+                                    >
+                                        <User className="w-4 h-4 text-cyan-400" />
+                                        <span className="text-[10px] font-black text-gray-200 tracking-widest uppercase">Profile</span>
+                                    </button>
+                                    <div className="h-px bg-gray-800 w-full" />
+                                    <button 
+                                        onClick={() => {
+                                            handleLogout();
+                                            setShowDropdown(false);
+                                        }}
+                                        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-red-500/10 transition-colors text-left text-red-400 group"
+                                    >
+                                        <LogOut className="w-4 h-4 group-hover:text-red-300" />
+                                        <span className="text-[10px] font-black tracking-widest uppercase group-hover:text-red-300">Sign Out</span>
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     ) : (
                         <button

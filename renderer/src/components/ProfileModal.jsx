@@ -73,6 +73,7 @@ export const ProfileModal = () => {
         setAuthUserId(null);
         localStorage.removeItem('installId');
         localStorage.removeItem('cyan_token');
+        localStorage.removeItem('cyan_user');
         addLog('User signed out.', 'info');
         setShowProfileModal(false);
     };

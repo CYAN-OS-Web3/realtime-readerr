@@ -66,8 +66,19 @@ export const useStore = create((set) => ({
   setAudioInputs: (inputs) => set({ audioInputs: inputs }),
   setAudioOutputs: (outputs) => set({ audioOutputs: outputs }),
 
-  // --- Auth & Identity ---
-  authUserId: '',
+// --- Auth & Identity ---
+  authUserId: (() => {
+    const savedUser = localStorage.getItem('cyan_user');
+    if (savedUser) {
+        try {
+            const parsed = JSON.parse(savedUser);
+            return parsed.id || parsed.email || 'synced-user';
+        } catch {
+            return savedUser;
+        }
+    }
+    return '';
+  })(),
   installId: localStorage.getItem('installId') || '',
   setAuthUserId: (id) => set({ authUserId: id }),
   setInstallId: (id) => {

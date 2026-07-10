@@ -34,6 +34,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     showOverlay: () => ipcRenderer.send('overlay:show'),
     hideOverlay: () => ipcRenderer.send('overlay:hide'),
 
+    // Gọi: Lấy danh sách màn hình/cửa sổ để capture system audio
+    getDesktopSources: () => ipcRenderer.invoke('get-desktop-sources'),
+
 
     // =========================================================
     // LISTENERS (Main -> Renderer)

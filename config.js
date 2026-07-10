@@ -4,7 +4,7 @@ require('dotenv').config();
 
 module.exports = {
     // Backend & Identity
-    BACKEND_URL: 'https://translator-gateway.fly.dev/',
+    BACKEND_URL: 'https://translator-gateway.fly.dev',
     CYAN_USER_ID: (process.env.CYAN_USER_ID || '').toString().trim(),
     GCP_PROJECT_ID: (process.env.GCP_PROJECT_ID || '').toString().trim(),
 

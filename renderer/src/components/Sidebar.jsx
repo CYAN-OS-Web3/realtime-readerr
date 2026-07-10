@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { MessageSquare, Mic2, FileText, Activity, ChevronLeft, ChevronRight, PanelsTopLeft, Sparkles, Terminal } from 'lucide-react';
+import { MessageSquare, Mic2, FileText, Activity, ChevronLeft, ChevronRight, PanelsTopLeft, Sparkles, Terminal, User } from 'lucide-react';
 import { useStore } from '../store/useStore';
 
 export const Sidebar = () => {
-    const { activeTab, setActiveTab, micVolume, settings, isTranslating } = useStore();
+    const { activeTab, setActiveTab, micVolume, settings, updateSettings, isTranslating } = useStore();
     const [isCollapsed, setIsCollapsed] = useState(false);
+    const [audioDevices, setAudioDevices] = useState([]);
 
     useEffect(() => {
         const handleResize = () => {
@@ -16,11 +17,27 @@ export const Sidebar = () => {
         return () => window.removeEventListener('resize', handleResize);
     }, []);
 
+    useEffect(() => {
+        const getDevices = async () => {
+            try {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const audioInputs = devices.filter(device => device.kind === 'audioinput');
+                setAudioDevices(audioInputs);
+            } catch (error) {
+                console.error("Error fetching audio devices:", error);
+            }
+        };
+
+        getDevices();
+        navigator.mediaDevices.addEventListener('devicechange', getDevices);
+        return () => navigator.mediaDevices.removeEventListener('devicechange', getDevices);
+    }, []);
+
     const menuItems = [
         { id: 'translation', icon: MessageSquare, label: 'Translation' },
         { id: 'summaries', icon: Sparkles, label: 'Summaries' },
         { id: 'voice', icon: Mic2, label: 'Voice Manager' },
-        { id: 'logs', icon: Terminal, label: 'System Logs' },
+        { id: 'profile', icon: User, label: 'Profile' }
     ];
 
     return (
@@ -70,6 +87,7 @@ export const Sidebar = () => {
                                             {item.id === 'summaries' && 'Review AI-generated session summaries'}
                                             {item.id === 'voice' && 'Voice cloning and payment workflow'}
                                             {item.id === 'logs' && 'System events and pipeline status'}
+                                            {item.id === 'profile' && 'Account status and subscription quotas'}
                                         </p>
                                     </div>
                                 )}
@@ -107,6 +125,25 @@ export const Sidebar = () => {
                         ))}
                     </div>
                 </div>
+
+                {!isCollapsed && audioDevices.length > 0 && (
+                    <div className="pt-2 pb-1">
+                        <select 
+                            value={settings.inputDeviceId || ''}
+                            onChange={(e) => updateSettings({ inputDeviceId: e.target.value })}
+                            className="w-full bg-[#1a1a1a] border border-white/20 hover:border-white/30 rounded-lg px-3 py-2.5 text-xs text-gray-200 font-semibold outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/50 transition-all cursor-pointer appearance-none shadow-lg"
+                            style={{ backgroundImage: `url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%239CA3AF%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 0.75rem top 50%', backgroundSize: '0.5rem auto' }}
+                        >
+                            <option value="" className="bg-[#1a1a1a] text-gray-200 py-1">Default Microphone</option>
+                            <option value="system-audio" className="bg-[#1a1a1a] text-cyan-400 py-1 font-bold">System Audio (Beta)</option>
+                            {audioDevices.map(device => (
+                                <option key={device.deviceId} value={device.deviceId} className="bg-[#1a1a1a] text-gray-200 py-1">
+                                    {device.label || `Microphone ${audioDevices.indexOf(device) + 1}`}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                )}
 
                 {!isCollapsed && (
                     <div className="text-center pt-2 border-t border-white/5">

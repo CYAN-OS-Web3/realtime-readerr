@@ -167,7 +167,7 @@ const App = () => {
         {/* Header */}
         <header className="bg-gradient-to-r from-blue-600 to-blue-500 text-white p-4 rounded-t-xl shadow">
           <div className="flex justify-between items-center">
-            <h1 className="text-xl font-bold">Dịch Thuật Thời Gian Thực</h1>
+            <h1 className="text-xl font-bold">CyanOS</h1>
             <div className="flex items-center space-x-2">
               <button 
                 onClick={toggleDarkMode}

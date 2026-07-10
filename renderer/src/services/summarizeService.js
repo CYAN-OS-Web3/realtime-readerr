@@ -47,7 +47,7 @@ export const goBackendService = {
     try {
       // Route summarization requests through Go proxy endpoint (do NOT call Python directly)
       const backendUrl = goBackendService.getBackendUrl();
-      const endpoint = `${backendUrl}/api/v1/summarization/request`;
+      const endpoint = `https://translator-gateway.fly.dev/api/v1/summarization/request`;
 
       // Transform transcripts to match expected schema (camelCase)
       const transformedTranscripts = sessionData.transcripts.map(t => {
@@ -134,7 +134,7 @@ export const goBackendService = {
   healthCheck: async () => {
     try {
       const backendUrl = goBackendService.getBackendUrl();
-      const response = await fetch(`${backendUrl}/health`, {
+      const response = await fetch(`https://translator-gateway.fly.dev/health`, {
         method: 'GET',
         headers: { 'Accept': 'application/json' }
       });
@@ -156,7 +156,7 @@ export const goBackendService = {
   getStoredSummary: async (sessionId, token = '') => {
     try {
       const backendUrl = goBackendService.getBackendUrl();
-      const endpoint = `${backendUrl}/api/v1/summarization/summary/${sessionId}`;
+      const endpoint = `https://translator-gateway.fly.dev/api/v1/summarization/summary/${sessionId}`;
 
       console.log(`[Summarizer] Fetching stored summary for: ${sessionId}`);
 

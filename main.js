@@ -1,6 +1,12 @@
 // main.js - Cấu hình Electron Forge và Xử lý Google STT/Translation Streaming
 
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, desktopCapturer } = require('electron');
+
+// Handle creating/removing shortcuts on Windows when installing/uninstalling
+if (require('electron-squirrel-startup')) {
+    app.quit();
+}
+
 app.disableHardwareAcceleration(); // Fix GPU crash
 
 process.on('uncaughtException', (error) => {
@@ -1325,6 +1331,15 @@ ipcMain.on('window:minimize', () => {
 
 ipcMain.handle('cyan:getBackendUrl', async () => config.BACKEND_URL);
 ipcMain.handle('cyan:getInstallId', async () => getInstallId());
+ipcMain.handle('get-desktop-sources', async () => {
+    try {
+        const sources = await desktopCapturer.getSources({ types: ['window', 'screen'] });
+        return sources.map(source => ({ id: source.id, name: source.name }));
+    } catch (e) {
+        console.error('Failed to get desktop sources:', e);
+        return [];
+    }
+});
 ipcMain.handle('cyan:openExternal', async (_event, url) => {
     console.log('[MAIN] IPC: Received cyan:openExternal request for:', url);
     if (!validateIPC('cyan:openExternal', url)) {
@@ -1359,6 +1374,7 @@ function createWindow() {
         minHeight: 700,
         backgroundColor: '#01060a',
         show: false,
+        icon: path.join(__dirname, 'renderer/public/cyanlogo.jpg'),
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
@@ -1374,7 +1390,7 @@ function createWindow() {
 
     const port = process.env.PORT || 5173;
     const startUrl = isDev
-        ? `http://localhost:${port}`
+        ? `http://127.0.0.1:${port}`
         : `file://${path.join(__dirname, 'renderer/dist/index.html')}`;
 
     console.log(`[MAIN] Loading UI from: ${startUrl} (Dev Mode: ${isDev})`);
@@ -1472,6 +1488,7 @@ function createOverlayWindow() {
     overlayWindow.setAlwaysOnTop(true, 'screen-saver');
     console.log('Overlay window created');
 }
+
 
 app.whenReady().then(() => {
     createWindow();

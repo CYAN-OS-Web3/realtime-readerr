@@ -184,19 +184,62 @@ export const useAudioPipeline = () => {
         isRunningRef.current = true;
 
         try {
-            // ---- 1. Get microphone stream ----------------------------
-            const stream = await navigator.mediaDevices.getUserMedia({
-                audio: {
+            let stream;
+
+            if (settings.inputDeviceId === 'system-audio') {
+                try {
+                    const sources = await window.electronAPI.getDesktopSources();
+                    const desktopSource = sources.find(s => s.id.startsWith('screen')) || sources[0];
+                    if (!desktopSource) {
+                        throw new Error("No screen source found for system audio capture.");
+                    }
+
+                    stream = await navigator.mediaDevices.getUserMedia({
+                        audio: {
+                            mandatory: {
+                                chromeMediaSource: 'desktop',
+                                chromeMediaSourceId: desktopSource.id
+                            }
+                        },
+                        video: {
+                            mandatory: {
+                                chromeMediaSource: 'desktop',
+                                chromeMediaSourceId: desktopSource.id,
+                                minWidth: 128,
+                                minHeight: 128,
+                                maxWidth: 128,
+                                maxHeight: 128
+                            }
+                        }
+                    });
+                    
+                    // We only want the audio track, stop the video track immediately
+                    stream.getVideoTracks().forEach(t => t.stop());
+                    
+                    if (stream.getAudioTracks().length === 0) {
+                        throw new Error("No audio track was captured from the system.");
+                    }
+                } catch (e) {
+                    console.error("Failed to capture system audio:", e);
+                    throw e;
+                }
+            } else {
+                let audioConstraints = {
                     echoCancellation: settings.noiseReduction,
                     noiseSuppression: settings.noiseReduction,
                     autoGainControl:  settings.noiseReduction,
                     channelCount: 1,
-                    sampleRate: { ideal: 48000 }, // request high quality; we'll downsample ourselves
-                    deviceId: settings.inputDeviceId
-                        ? { exact: settings.inputDeviceId }
-                        : undefined
+                    sampleRate: { ideal: 48000 }
+                };
+
+                if (settings.inputDeviceId) {
+                    audioConstraints.deviceId = { exact: settings.inputDeviceId };
                 }
-            });
+
+                stream = await navigator.mediaDevices.getUserMedia({
+                    audio: audioConstraints
+                });
+            }
 
             if (!isRunningRef.current) {
                 // Stopped before stream arrived

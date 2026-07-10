@@ -19,7 +19,7 @@ export const SummariesPage = () => {
         try {
             const token = localStorage.getItem('cyan_token') || '';
             const backendUrl = goBackendService.getBackendUrl();
-            const url = `${backendUrl}/api/v1/summarization/list?page=${page}&page_size=${pageSize}`;
+            const url = `https://translator-gateway.fly.dev/api/v1/summarization/list?page=${page}&page_size=${pageSize}`;
 
             console.log(`[SummariesPage] Fetching summaries from: ${url}`);
             console.log(`[SummariesPage] Auth Debug:`, {

@@ -53,7 +53,7 @@ module.exports = {
     generateAssets: async () => {
       // ONLY build the renderer bundle if we are NOT in development mode.
       // In development, we serve directly from the Vite dev server on port 5173.
-      if (process.env.IS_DEV === 'true' || process.env.NODE_ENV === 'development') {
+      if (process.argv.some(arg => arg.includes('start')) || process.env.IS_DEV === 'true' || process.env.NODE_ENV === 'development') {
         console.log('Development mode: Skipping renderer build, using dev server...');
         return;
       }

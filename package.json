@@ -1,5 +1,6 @@
 {
-  "name": "realtime-translator",
+  "name": "cyanos",
+  "productName": "CyanOS",
   "version": "1.0.0",
   "description": "Real-time speech translation application",
   "main": "main.js",
@@ -8,7 +9,7 @@
     "dev": "npm run kill-ports && concurrently \"npm run start:renderer\" \"wait-on tcp:5173 && electron-forge start\"",
     "electron:dev": "npm run dev",
     "start:renderer": "cd renderer && npm run dev",
-    "kill-ports": "powershell -Command \"$p1 = Get-NetTCPConnection -LocalPort 5173 -ErrorAction SilentlyContinue; if($p1){$p1 | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }}; $p2 = Get-NetTCPConnection -LocalPort 5174 -ErrorAction SilentlyContinue; if($p2){$p2 | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }}; Get-Process | Where-Object { $_.ProcessName -like '*Electron*' } | Stop-Process -Force -ErrorAction SilentlyContinue; exit 0\"",
+    "kill-ports": "powershell -Command \"$p1 = Get-NetTCPConnection -LocalPort 5173 -ErrorAction SilentlyContinue; if($p1){$p1 | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }}; $p2 = Get-NetTCPConnection -LocalPort 5174 -ErrorAction SilentlyContinue; if($p2){$p2 | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }}; Get-Process | Where-Object { $_.ProcessName -match 'Electron|realtime-translator' } | Stop-Process -Force -ErrorAction SilentlyContinue; exit 0\"",
     "build:renderer": "cd renderer && npm run build",
     "build:dev": "cd renderer && npm run build",
     "doctor": "powershell -ExecutionPolicy Bypass -File ./scripts/doctor.ps1",
@@ -33,7 +34,7 @@
   ],
   "build": {
     "appId": "com.cyan.translator",
-    "productName": "CyanTranslator",
+    "productName": "CyanOS",
     "directories": {
       "output": "build-out"
     },
@@ -61,7 +62,7 @@
           ]
         }
       ],
-      "icon": "assets/icon.ico"
+      "icon": "renderer/public/cyanlogo.jpg"
     },
     "nsis": {
       "oneClick": false,
