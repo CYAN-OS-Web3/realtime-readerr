@@ -102,17 +102,12 @@ export const SummariesPage = () => {
     }
 
     return (
-        <div className="flex-1 flex flex-col bg-gray-950/50 h-full animate-in fade-in duration-500 overflow-hidden">
+        <div className="flex-1 flex flex-col glass-panel h-full animate-in fade-in duration-500 overflow-hidden">
             {/* Header */}
-            <div className="px-6 py-4 bg-gray-900 border-b border-gray-800 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                    <div className="p-2 bg-cyan-500/10 rounded-lg border border-cyan-500/20">
-                        <Sparkles className="w-5 h-5 text-cyan-400" />
-                    </div>
-                    <div>
-                        <h2 className="text-sm font-black text-white tracking-widest uppercase">AI Summary Summary</h2>
-                        <p className="text-[10px] text-gray-500 font-bold uppercase tracking-tighter">Archived Conversation Intelligence</p>
-                    </div>
+            <div className="px-8 py-6 bg-gray-900/50 border-b border-dashed border-gray-700/50 flex items-center justify-between">
+                <div>
+                    <h2 className="text-2xl font-black text-white tracking-tight uppercase mb-1">AI Summary</h2>
+                    <p className="text-[10px] text-cyan-500 font-bold uppercase tracking-[0.2em]">Archived Conversation Intelligence</p>
                 </div>
 
                 <div className="flex items-center gap-4">
@@ -123,13 +118,13 @@ export const SummariesPage = () => {
                             placeholder="SEARCH SESSIONS..."
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
-                            className="bg-gray-800/50 border border-gray-700 rounded-full pl-9 pr-4 py-2 text-[10px] text-white focus:outline-none focus:border-cyan-500/50 w-64 transition-all"
+                            className="glass-input rounded-full pl-9 pr-4 py-2 text-[10px] text-white w-64"
                         />
                     </div>
                     <button 
                         onClick={fetchSummaries}
                         disabled={isLoading}
-                        className="p-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-gray-400 transition-all disabled:opacity-50"
+                        className="p-2 glass-button rounded-lg text-gray-400 disabled:opacity-50"
                     >
                         <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
                     </button>
@@ -154,10 +149,10 @@ export const SummariesPage = () => {
                             <div 
                                 key={summary.id}
                                 onClick={() => toggleExpand(summary.id)}
-                                className={`group bg-gray-900/40 border transition-all duration-500 overflow-hidden cursor-pointer ${
+                                className={`group glass-panel transition-all duration-500 overflow-hidden cursor-pointer ${
                                     expandedId === summary.id 
                                         ? 'border-cyan-500/50 ring-1 ring-cyan-500/20 shadow-[0_20px_60px_rgba(0,0,0,0.6)] rounded-3xl' 
-                                        : 'border-gray-800 hover:border-cyan-500/30 rounded-2xl hover:shadow-[0_10px_30px_rgba(0,0,0,0.3)]'
+                                        : 'hover:border-cyan-500/30 rounded-2xl hover:shadow-[0_10px_30px_rgba(0,0,0,0.3)]'
                                 }`}
                             >
                                 <div className="p-5 flex gap-6">
@@ -217,7 +212,7 @@ export const SummariesPage = () => {
                                                         <h4 className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em]">Core Topics</h4>
                                                         <div className="flex flex-wrap gap-2">
                                                             {summary.metadata.summary_with_sources.main_topics.map((topic, idx) => (
-                                                                <span key={idx} className="px-3 py-1 bg-gray-800/50 border border-gray-700 rounded-full text-[10px] text-gray-400 font-bold uppercase tracking-wider">
+                                                                <span key={idx} className="px-3 py-1 bg-gray-800/30 border border-dashed border-gray-600 rounded-full text-[10px] text-gray-400 font-bold uppercase tracking-wider">
                                                                     {topic}
                                                                 </span>
                                                             ))}
@@ -229,11 +224,11 @@ export const SummariesPage = () => {
                                             {/* Participants & Stats */}
                                             <div className="space-y-6">
                                                 <div className="grid grid-cols-2 gap-4">
-                                                    <div className="p-4 bg-gray-800/30 rounded-2xl border border-gray-700/50">
+                                                    <div className="p-4 bg-gray-800/30 rounded-2xl border border-dashed border-gray-700/50">
                                                         <p className="text-[9px] font-black text-gray-500 uppercase tracking-widest mb-1">Turns</p>
                                                         <p className="text-xl font-black text-white">{summary.metadata?.turn_count || 0}</p>
                                                     </div>
-                                                    <div className="p-4 bg-gray-800/30 rounded-2xl border border-gray-700/50">
+                                                    <div className="p-4 bg-gray-800/30 rounded-2xl border border-dashed border-gray-700/50">
                                                         <p className="text-[9px] font-black text-gray-500 uppercase tracking-widest mb-1">Sentiment</p>
                                                         <p className="text-xs font-black text-cyan-400 uppercase tracking-widest">{summary.metadata?.sentiment || 'NEUTRAL'}</p>
                                                     </div>
@@ -244,7 +239,7 @@ export const SummariesPage = () => {
                                                         <h4 className="text-[10px] font-black text-gray-500 uppercase tracking-[0.2em]">Identified Speakers</h4>
                                                         <div className="flex flex-wrap gap-2">
                                                             {summary.metadata.summary_with_sources.participants.map((p, idx) => (
-                                                                <div key={idx} className="flex items-center gap-2 px-3 py-1.5 bg-cyan-500/5 border border-cyan-500/10 rounded-xl">
+                                                                <div key={idx} className="flex items-center gap-2 px-3 py-1.5 bg-cyan-500/5 border border-dashed border-cyan-500/30 rounded-xl">
                                                                     <div className="w-1.5 h-1.5 bg-cyan-500 rounded-full"></div>
                                                                     <span className="text-[10px] font-black text-gray-300 uppercase tracking-tight">{p}</span>
                                                                 </div>
@@ -265,7 +260,7 @@ export const SummariesPage = () => {
             </div>
 
             {/* Footer / Pagination */}
-            <div className="px-6 py-4 bg-gray-900/80 border-t border-gray-800 flex items-center justify-between select-none">
+            <div className="px-6 py-4 bg-gray-900/50 border-t border-dashed border-gray-700/50 flex items-center justify-between select-none">
                 <div className="flex items-center gap-4">
                     <span className="text-[9px] font-black text-gray-500 tracking-widest uppercase">
                         Showing {filteredSummaries.length} of {total} Summaries
@@ -276,17 +271,17 @@ export const SummariesPage = () => {
                     <button 
                         disabled={page === 1 || isLoading}
                         onClick={() => setPage(p => p - 1)}
-                        className="p-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-gray-400 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                        className="p-2 glass-button rounded-lg text-gray-400 disabled:opacity-30 disabled:cursor-not-allowed"
                     >
                         <ChevronLeft className="w-4 h-4" />
                     </button>
-                    <div className="px-4 py-1.5 bg-gray-800 border border-gray-700 rounded-lg min-w-[40px] flex items-center justify-center">
+                    <div className="px-4 py-1.5 glass-panel rounded-lg min-w-[40px] flex items-center justify-center">
                         <span className="text-xs font-black text-white">{page}</span>
                     </div>
                     <button 
                         disabled={summaries.length < pageSize || isLoading}
                         onClick={() => setPage(p => p + 1)}
-                        className="p-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-gray-400 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                        className="p-2 glass-button rounded-lg text-gray-400 disabled:opacity-30 disabled:cursor-not-allowed"
                     >
                         <ChevronRight className="w-4 h-4" />
                     </button>

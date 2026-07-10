@@ -6,11 +6,11 @@ export const LogsPanel = () => {
     const { logs, clearLogs } = useStore();
 
     return (
-        <div className="flex-1 flex flex-col bg-gray-950/50 h-full animate-in fade-in duration-500">
+        <div className="flex-1 flex flex-col glass-panel h-full animate-in fade-in duration-500">
             {/* Header */}
-            <div className="px-6 py-4 bg-gray-900 border-b border-gray-800 flex items-center justify-between">
+            <div className="px-6 py-4 bg-gray-900/50 border-b border-dashed border-gray-700/50 flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                    <div className="p-2 bg-gray-800 rounded-lg border border-gray-700">
+                    <div className="p-2 bg-gray-800/40 rounded-lg border border-dashed border-gray-600">
                         <Terminal className="w-5 h-5 text-cyan-400" />
                     </div>
                     <div>
@@ -30,7 +30,7 @@ export const LogsPanel = () => {
                             });
                             window.location.reload();
                         }}
-                        className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded-lg text-amber-500 transition-all group"
+                        className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 hover:bg-amber-500/20 border border-dashed border-amber-500/50 rounded-lg text-amber-500 transition-all group"
                         title="Clear all local state and tokens"
                     >
                         <RefreshCw className="w-4 h-4 group-hover:rotate-180 transition-transform duration-500" />
@@ -39,7 +39,7 @@ export const LogsPanel = () => {
 
                     <button 
                         onClick={clearLogs}
-                        className="flex items-center gap-2 px-4 py-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 rounded-lg text-red-500 transition-all group"
+                        className="flex items-center gap-2 px-4 py-2 bg-red-500/10 hover:bg-red-500/20 border border-dashed border-red-500/50 rounded-lg text-red-500 transition-all group"
                     >
                         <Trash2 className="w-4 h-4" />
                         <span className="text-[10px] font-black tracking-widest uppercase">Flush Buffer</span>
@@ -58,7 +58,7 @@ export const LogsPanel = () => {
                     logs.map((log, idx) => (
                         <div 
                             key={idx} 
-                            className={`flex items-start gap-4 p-3 rounded-lg border leading-tight transition-all animate-in slide-in-from-left-2 duration-300 ${
+                            className={`flex items-start gap-4 p-3 rounded-lg border border-dashed leading-tight transition-all animate-in slide-in-from-left-2 duration-300 ${
                                 log.type === 'error' ? 'bg-red-500/5 border-red-500/20 text-red-400' :
                                 log.type === 'warn' ? 'bg-amber-500/5 border-amber-500/20 text-amber-400' :
                                 'bg-gray-900/40 border-gray-800/40 text-gray-400'
@@ -81,7 +81,7 @@ export const LogsPanel = () => {
             </div>
 
             {/* Footer Stats */}
-            <div className="px-6 py-3 bg-gray-900/80 border-t border-gray-800 flex items-center justify-between select-none">
+            <div className="px-6 py-3 bg-gray-900/50 border-t border-dashed border-gray-700/50 flex items-center justify-between select-none">
                 <div className="flex gap-6">
                     <div className="flex items-center gap-2">
                         <div className="w-1.5 h-1.5 bg-cyan-500 rounded-full" />

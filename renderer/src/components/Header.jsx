@@ -80,7 +80,7 @@ export const Header = () => {
         };
         const info = stateMap[wsConnectionState] || stateMap.disconnected;
         return (
-            <div className="flex items-center gap-1.5 bg-black/30 px-2 py-0.5 rounded border border-white/5">
+            <div className="flex items-center gap-1.5 bg-black/30 backdrop-blur-sm px-2 py-0.5 rounded border border-dashed border-white/10">
                 <div className={`w-1.5 h-1.5 rounded-full ${info.color}`} />
                 <span className="text-[8px] font-black text-gray-400 tracking-widest uppercase">{info.label}</span>
             </div>
@@ -88,7 +88,7 @@ export const Header = () => {
     };
 
     return (
-        <header className="h-14 bg-black/60 backdrop-blur-md border-b border-gray-800/80 flex items-center justify-between px-6 relative z-30">
+        <header className="h-14 bg-gray-900/40 backdrop-blur-md border-b border-dashed border-gray-700/50 flex items-center justify-between px-6 relative z-30 shadow-md">
             {/* Logo Section */}
             <div className="flex items-center gap-4">
                 <div className="flex items-center gap-2">
@@ -113,7 +113,7 @@ export const Header = () => {
                         <span className="text-[10px] font-black text-gray-400 tracking-widest uppercase">{isConnected ? 'ONLINE' : 'OFFLINE'}</span>
                     </div>
                     {isConnected && (
-                        <span className="text-[9px] font-mono text-cyan-500/50 bg-cyan-500/5 px-2 py-0.5 rounded border border-cyan-500/10">{latency}ms</span>
+                        <span className="text-[9px] font-mono text-cyan-500/50 bg-cyan-500/5 px-2 py-0.5 rounded border border-dashed border-cyan-500/10">{latency}ms</span>
                     )}
                     {getWSIndicator()}
                 </div>
@@ -126,7 +126,7 @@ export const Header = () => {
                         <div className="relative">
                             <div 
                                 onClick={() => setShowDropdown(!showDropdown)}
-                                className="flex items-center gap-3 bg-gray-900 border border-gray-800 rounded-full pl-1.5 pr-3 py-1 group hover:border-cyan-500/50 hover:bg-gray-800/80 transition-all cursor-pointer select-none"
+                                className="flex items-center gap-3 glass-button rounded-full pl-1.5 pr-3 py-1 group hover:border-cyan-500/50 cursor-pointer select-none"
                             >
                                 <div className="w-6 h-6 rounded-full bg-cyan-500 flex items-center justify-center text-[10px] font-black text-black">
                                     {(displayName || '').slice(0,2).toUpperCase()}
@@ -136,7 +136,7 @@ export const Header = () => {
                             </div>
                             
                             {showDropdown && (
-                                <div className="absolute right-0 top-full mt-2 w-40 bg-gray-900 border border-gray-800 rounded-xl shadow-[0_0_30px_rgba(0,0,0,0.5)] overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-200">
+                                <div className="absolute right-0 top-full mt-2 w-40 glass-panel rounded-xl overflow-hidden z-50 animate-in fade-in slide-in-from-top-2 duration-200">
                                     <button 
                                         onClick={() => {
                                             setActiveTab('profile');
@@ -165,7 +165,7 @@ export const Header = () => {
                         <button
                             onClick={handleLogin}
                             disabled={isLoggingIn}
-                            className={`flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-full transition-all text-[10px] text-white font-black tracking-widest uppercase group ${isLoggingIn ? 'opacity-50 cursor-wait' : ''}`}
+                            className={`flex items-center gap-2 px-4 py-2 glass-button rounded-full text-[10px] text-white font-black tracking-widest uppercase group ${isLoggingIn ? 'opacity-50 cursor-wait' : ''}`}
                         >
                             <User className={`w-3.5 h-3.5 text-gray-400 group-hover:text-cyan-400 ${isLoggingIn ? 'animate-pulse text-cyan-400' : ''}`} />
                             <span>{isLoggingIn ? 'CONNECTING...' : 'Connect Account'}</span>

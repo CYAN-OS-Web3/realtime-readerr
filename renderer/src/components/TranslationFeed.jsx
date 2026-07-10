@@ -12,9 +12,9 @@ export const TranslationFeed = () => {
     const targetFlag = settings.languages?.find(l => l.code === targetLang)?.flag || '🌐';
 
     return (
-        <div className="flex-1 flex flex-col bg-black/40 border border-gray-800/50 rounded-2xl overflow-hidden backdrop-blur-md shadow-2xl relative group">
+        <div className="flex-1 flex flex-col glass-panel rounded-2xl overflow-hidden relative group">
             {/* Header / Legend */}
-            <div className="flex items-center justify-between px-5 py-3 bg-gray-900/50 border-b border-gray-800/50">
+            <div className="flex items-center justify-between px-5 py-3 bg-gray-900/50 border-b border-dashed border-gray-700/50">
                 <div className="flex items-center gap-4">
                     <div className="flex items-center gap-1.5">
                         <span className="text-[10px] font-black text-gray-500 tracking-widest uppercase">{sourceFlag} {sourceLabel}</span>
@@ -51,14 +51,14 @@ export const TranslationFeed = () => {
                             className="grid grid-cols-2 gap-4 animate-in fade-in slide-in-from-bottom-4 duration-500 ease-out"
                         >
                             {/* Source Side */}
-                            <div className="bg-gray-800/30 border border-gray-700/30 rounded-xl p-3 shadow-inner hover:bg-gray-800/40 transition-colors">
+                            <div className="bg-gray-800/30 border border-dashed border-gray-700/50 rounded-xl p-3 shadow-inner hover:bg-gray-800/40 transition-colors">
                                 <p className="text-xs leading-relaxed text-gray-300 font-medium break-words">
                                     {item.source || '...'}
                                 </p>
                             </div>
 
                             {/* Target Side */}
-                            <div className="bg-cyan-500/5 border border-cyan-500/20 rounded-xl p-3 shadow-lg hover:bg-cyan-500/10 transition-colors relative">
+                            <div className="bg-cyan-500/5 border border-dashed border-cyan-500/30 rounded-xl p-3 shadow-lg hover:bg-cyan-500/10 transition-colors relative">
                                 <p className="text-xs leading-relaxed text-cyan-100 font-bold break-words">
                                     {item.target || (isTranslating ? 'Translating...' : '—')}
                                 </p>

@@ -82,7 +82,7 @@ export const ProfileModal = () => {
 
     return (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-4 animate-in fade-in duration-300">
-            <div className="bg-gray-900 border border-cyan-500/30 rounded-2xl p-8 w-full max-w-lg shadow-[0_0_100px_rgba(6,182,212,0.1)] relative overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="glass-panel p-8 w-full max-w-lg shadow-[0_0_100px_rgba(6,182,212,0.1)] relative overflow-hidden flex flex-col max-h-[90vh]">
                 {/* Decorative glow */}
                 <div className="absolute top-0 right-0 w-48 h-48 bg-cyan-500/10 blur-[60px] -mr-16 -mt-16 rounded-full pointer-events-none" />
                 <div className="absolute bottom-0 left-0 w-48 h-48 bg-blue-600/10 blur-[60px] -ml-16 -mb-16 rounded-full pointer-events-none" />
@@ -90,8 +90,7 @@ export const ProfileModal = () => {
                 <div className="flex items-center justify-between mb-6 relative z-10">
                     <h3 className="text-xl font-black text-white tracking-widest uppercase italic">User <span className="text-cyan-400">Profile</span></h3>
                     <button 
-                        onClick={() => setShowProfileModal(false)}
-                        className="p-2 hover:bg-gray-800 rounded-lg transition-colors text-gray-500 hover:text-white"
+                        className="p-2 glass-button text-gray-500 hover:text-white"
                     >
                         <X className="w-5 h-5" />
                     </button>
@@ -111,7 +110,7 @@ export const ProfileModal = () => {
                     ) : (
                         <div className="space-y-6">
                             {/* Profile Details */}
-                            <div className="bg-black/40 border border-white/5 rounded-xl p-5">
+                            <div className="glass-panel rounded-xl p-5">
                                 <div className="flex items-center justify-between mb-4">
                                     <h4 className="text-[10px] font-black text-gray-400 tracking-[0.2em] uppercase flex items-center gap-2">
                                         <User className="w-3.5 h-3.5" />
@@ -121,7 +120,7 @@ export const ProfileModal = () => {
 
                                 <div className="space-y-4 text-sm">
                                     <div className="flex items-center gap-4">
-                                        <div className="w-12 h-12 rounded-full bg-cyan-500/20 flex items-center justify-center text-lg font-black text-cyan-400 border border-cyan-500/30 shrink-0">
+                                        <div className="w-12 h-12 rounded-full bg-cyan-500/20 flex items-center justify-center text-lg font-black text-cyan-400 border border-dashed border-cyan-500/30 shrink-0">
                                             {(profile?.first_name?.[0] || profile?.username?.[0] || 'U').toUpperCase()}
                                         </div>
                                         <div>
@@ -131,7 +130,7 @@ export const ProfileModal = () => {
                                             <div className="text-gray-400 text-xs">{profile?.email}</div>
                                         </div>
                                     </div>
-                                    <div className="grid grid-cols-1 gap-4 mt-4 bg-white/5 p-3 rounded-lg border border-white/5">
+                                    <div className="grid grid-cols-1 gap-4 mt-4 glass-panel p-3 rounded-lg">
                                         <div>
                                             <span className="text-[9px] font-bold text-gray-500 uppercase tracking-widest block mb-0.5">Account Status</span>
                                             <div className="flex items-center gap-1.5">
@@ -145,13 +144,13 @@ export const ProfileModal = () => {
 
                             {/* Subscription Details */}
                             {subscription && (
-                                <div className="bg-black/40 border border-white/5 rounded-xl p-5">
+                                <div className="glass-panel rounded-xl p-5">
                                     <div className="flex items-center justify-between mb-4">
                                         <h4 className="text-[10px] font-black text-gray-400 tracking-[0.2em] uppercase flex items-center gap-2">
                                             <CreditCard className="w-3.5 h-3.5" />
                                             Subscription & Quotas
                                         </h4>
-                                        <div className="px-2 py-0.5 bg-cyan-500/10 border border-cyan-500/20 rounded text-[10px] font-black text-cyan-400 tracking-widest uppercase">
+                                        <div className="px-2 py-0.5 bg-cyan-500/10 border border-dashed border-cyan-500/30 rounded text-[10px] font-black text-cyan-400 tracking-widest uppercase">
                                             {subscription.plan_display || subscription.plan}
                                         </div>
                                     </div>
@@ -172,13 +171,13 @@ export const ProfileModal = () => {
                                         </div>
 
                                         <div className="grid grid-cols-2 gap-3">
-                                            <div className="bg-white/5 border border-white/5 rounded-lg p-3">
+                                            <div className="glass-panel rounded-lg p-3">
                                                 <span className="text-[9px] font-bold text-gray-500 uppercase tracking-widest block mb-1">ElevenLabs Credits</span>
                                                 <div className="text-sm font-black text-white">
                                                     {subscription.eleven_credits_used?.toLocaleString() || 0} <span className="text-gray-500 font-medium text-xs">/ {subscription.eleven_credits_limit?.toLocaleString() || 'N/A'}</span>
                                                 </div>
                                             </div>
-                                            <div className="bg-white/5 border border-white/5 rounded-lg p-3">
+                                            <div className="glass-panel rounded-lg p-3">
                                                 <span className="text-[9px] font-bold text-gray-500 uppercase tracking-widest block mb-1">Time Used</span>
                                                 <div className="text-sm font-black text-white">
                                                     {subscription.minutes_used} <span className="text-gray-500 font-medium text-xs">/ {subscription.minutes_limit} min</span>
@@ -202,14 +201,14 @@ export const ProfileModal = () => {
                 <div className="mt-6 pt-6 border-t border-white/10 flex justify-between items-center relative z-10">
                     <button 
                         onClick={handleLogout}
-                        className="flex items-center gap-2 px-4 py-2 border border-red-500/20 text-red-400 font-bold text-xs tracking-widest rounded-lg hover:bg-red-500/10 transition-all uppercase"
+                        className="flex items-center gap-2 px-4 py-2 border border-dashed border-red-500/30 bg-red-500/5 text-red-400 font-bold text-xs tracking-widest rounded-lg hover:bg-red-500/10 transition-all uppercase"
                     >
                         <LogOut className="w-4 h-4" />
                         Sign Out
                     </button>
                     <button 
                         onClick={() => setShowProfileModal(false)}
-                        className="px-6 py-2 bg-white/5 border border-white/10 text-white font-bold text-xs tracking-widest rounded-lg hover:bg-white/10 transition-all uppercase"
+                        className="px-6 py-2 glass-button text-white font-bold text-xs tracking-widest rounded-lg uppercase"
                     >
                         Close
                     </button>
