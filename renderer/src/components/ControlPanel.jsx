@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { Settings, Play, Square, Volume2, Mic, Activity, SparkleIcon, Wand2Icon } from 'lucide-react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Settings, Play, Pause, Square, Volume2, Mic, Activity, SparkleIcon, Wand2Icon } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { ipcService } from '../services/ipcService';
 import { goBackendService } from '../services/summarizeService';
@@ -9,10 +9,10 @@ export const ControlPanel = () => {
     const { 
         isTranslating, 
         setIsTranslating, 
+        sessionPhase,
+        setSessionPhase,
         settings, 
         updateSettings,
-        audioInputs,
-        audioOutputs,
         addLog,
         setShowConfigModal,
         startSession,
@@ -24,72 +24,91 @@ export const ControlPanel = () => {
     } = useStore();
 
     const [isSubmitting, setIsSubmitting] = useState(false);
-    const [sessionEnded, setSessionEnded] = useState(false);
-    const [summaryResult, setSummaryResult] = useState(null);
-
-    const toggleTranslation = async () => {
-        const newState = !isTranslating;
-        
-        if (newState) {
-            try {
-                // Start a new session
+    const startStreaming = async ({ isResume = false } = {}) => {
+        try {
+            if (!isResume) {
+                updateSettings({ inputDeviceId: '' });
+                localStorage.removeItem('inputDeviceId');
                 startSession();
-                setSessionEnded(false);
-                setSummaryResult(null);
+                setSessionPhase('active');
                 addLog('🟢 Session started', 'info');
-                
-                const targetShort = settings.targetLang.split('-')[0];
-                ipcService.toggleTranslation({
-                    isTranslating: true,
-                    sourceLang: settings.sourceLang,
-                    targetLang: targetShort,
-                    ttsEngine: settings.ttsEngine,
-                    sensitivity: settings.sensitivity,
-                    sampleRate: settings.sampleRate,
-                    token: localStorage.getItem('cyan_token') || ''
-                });
-                ipcService.showOverlay();
-                setIsTranslating(true);
-                addLog('Bắt đầu dịch trực tiếp...', 'info');
-            } catch (err) {
-                console.error("Start failed:", err);
-                setIsTranslating(false);
+            } else {
+                addLog('▶️ Session resumed', 'info');
             }
-        } else {
-            try {
-                console.log("Sending STOP");
-                ipcService.toggleTranslation({ isTranslating: false });
-                ipcService.hideOverlay();
-                setIsTranslating(false);
-                setSessionEnded(true);
-                
-                // Get final transcripts
-                const sessionData = getSessionTranscripts();
-                
-                if (sessionData.transcripts.length > 0) {
-                    addLog(`⏹️ Session stopped. Captured ${sessionData.transcripts.length} transcripts.`, 'info');
-                    addLog(`💡 Click "Give Summary" to summarize the conversation.`, 'info');
-                    
-                    // Automatically check if a summary already exists for this session ID
-                    try {
-                        const existing = await goBackendService.getStoredSummary(sessionData.sessionId);
-                        if (existing) {
-                            setSummaryResult(existing);
-                            addLog('📋 Restored summary from database', 'success');
-                        }
-                    } catch (e) {
-                        console.warn('[Summarizer] Failed to check for existing summary');
-                    }
-                } else {
-                    addLog('⏹️ Session stopped. No transcripts captured.', 'info');
-                    clearSessionTranscripts();
-                }
-            } catch (err) {
-                console.error("Stop failed:", err);
-                addLog('❌ Error stopping session', 'error');
-            }
+
+            const targetShort = settings.targetLang.split('-')[0];
+            ipcService.toggleTranslation({
+                isTranslating: true,
+                sourceLang: settings.sourceLang,
+                targetLang: targetShort,
+                ttsEngine: settings.ttsEngine,
+                sensitivity: settings.sensitivity,
+                sampleRate: settings.sampleRate,
+                token: localStorage.getItem('cyan_token') || ''
+            });
+            ipcService.showOverlay();
+            setIsTranslating(true);
+            setSessionPhase('active');
+            addLog('Bắt đầu dịch trực tiếp...', 'info');
+        } catch (err) {
+            console.error(isResume ? 'Resume failed:' : 'Start failed:', err);
+            setIsTranslating(false);
         }
     };
+
+    const pauseSession = async () => {
+        try {
+            console.log('Sending PAUSE');
+            ipcService.finalizeUtterance();
+            ipcService.toggleTranslation({ isTranslating: false });
+            ipcService.hideOverlay();
+            setIsTranslating(false);
+            setSessionPhase('paused');
+            addLog('⏸️ Session paused', 'info');
+        } catch (err) {
+            console.error('Pause failed:', err);
+            addLog('❌ Error pausing session', 'error');
+        }
+    };
+
+    const resumeSession = async () => {
+        await startStreaming({ isResume: true });
+    };
+
+    const endSession = useCallback(async () => {
+        try {
+            console.log("Sending STOP");
+            ipcService.finalizeUtterance();
+            ipcService.toggleTranslation({ isTranslating: false });
+            ipcService.hideOverlay();
+            setIsTranslating(false);
+            setSessionPhase('ended');
+            
+            // Get final transcripts
+            const sessionData = getSessionTranscripts();
+            
+            if (sessionData.transcripts.length > 0) {
+                addLog(`⏹️ Session stopped. Captured ${sessionData.transcripts.length} transcripts.`, 'info');
+                addLog(`💡 Click "Give Summary" to summarize the conversation.`, 'info');
+                
+                // Automatically check if a summary already exists for this session ID
+                try {
+                    const existing = await goBackendService.getStoredSummary(sessionData.sessionId);
+                    if (existing) {
+                        addLog('📋 Restored summary from database', 'success');
+                    }
+                } catch {
+                    console.warn('[Summarizer] Failed to check for existing summary');
+                }
+            } else {
+                addLog('⏹️ Session stopped. No transcripts captured.', 'info');
+                clearSessionTranscripts();
+            }
+        } catch (err) {
+            console.error("Stop failed:", err);
+            addLog('❌ Error stopping session', 'error');
+        }
+    }, [addLog, clearSessionTranscripts, getSessionTranscripts, setIsTranslating, setSessionPhase]);
     const handleGiveSummary = async () => {
         try {
             if (!authUserId) {
@@ -146,14 +165,6 @@ export const ControlPanel = () => {
                 const title = result.summary_title || 'Session Summary';
                 
                 // --- NEW: Fetch from DB to confirm storage ---
-                const storedRecord = await goBackendService.getStoredSummary(sessionData.sessionId, token);
-                
-                if (storedRecord) {
-                    setSummaryResult(storedRecord);
-                } else {
-                    setSummaryResult(result);
-                }
-                
                 // Show success toast via global store
                 setToast({
                     show: true,
@@ -183,34 +194,35 @@ export const ControlPanel = () => {
 
     const handleClearSession = () => {
         clearSessionTranscripts();
-        setSessionEnded(false);
-        setSummaryResult(null);
+        setSessionPhase('idle');
         addLog('Session cleared', 'info');
     };
 
     // Listen for Escape key to stop translation
     useEffect(() => {
         const handleKeyDown = (e) => {
-            if (e.key === 'Escape' && isTranslating) {
+            if (e.key === 'Escape' && (isTranslating || sessionPhase === 'paused')) {
                 console.log("Escape key pressed - stopping translation");
-                toggleTranslation();
+                endSession();
             }
         };
 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [isTranslating]);
+    }, [endSession, isTranslating, sessionPhase]);
 
     return (
         <div className="flex-1 flex flex-col p-4 space-y-5 overflow-y-auto custom-scrollbar">
             {/* Stream Control CTA */}
             <div className="relative group">
                 <button
-                    onClick={toggleTranslation}
+                    onClick={isTranslating ? pauseSession : (sessionPhase === 'paused' ? resumeSession : startStreaming)}
                     disabled={isSubmitting}
                     className={`w-full py-5 rounded-2xl flex flex-col items-center justify-center gap-1.5 transition-all duration-500 transform active:scale-95 z-10 relative disabled:opacity-50 disabled:cursor-not-allowed ${
                         isTranslating
                             ? 'bg-red-500/10 border border-dashed border-red-500/50 text-red-500 shadow-[0_0_30px_rgba(239,68,68,0.2)]'
+                            : sessionPhase === 'paused'
+                                ? 'bg-amber-500/10 border border-dashed border-amber-500/50 text-amber-400 shadow-[0_0_30px_rgba(245,158,11,0.2)]'
                             : 'bg-cyan-500 border border-dashed border-cyan-400 text-black shadow-[0_0_30px_rgba(6,182,212,0.3)]'
                     }`}
                 >
@@ -219,10 +231,15 @@ export const ControlPanel = () => {
                             <div className="w-5 h-5 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
                             <span className="text-[10px] font-black tracking-[0.2em] uppercase">Processing...</span>
                         </>
+                    ) : sessionPhase === 'paused' ? (
+                        <>
+                            <Play className="w-5 h-5 fill-amber-400" />
+                            <span className="text-[10px] font-black tracking-[0.2em] uppercase">RESUME SESSION</span>
+                        </>
                     ) : isTranslating ? (
                         <>
-                            <Square className="w-5 h-5 fill-red-500" />
-                            <span className="text-[10px] font-black tracking-[0.2em] uppercase">STOP SESSION</span>
+                            <Pause className="w-5 h-5 fill-red-500" />
+                            <span className="text-[10px] font-black tracking-[0.2em] uppercase">PAUSE SESSION</span>
                         </>
                     ) : (
                         <>
@@ -236,8 +253,47 @@ export const ControlPanel = () => {
                 )}
             </div>
 
-            {/* Summary Actions (shown after session ends) */}
-            {sessionEnded && !isTranslating && (
+            {/* Summary Actions (shown while paused or after session ends) */}
+            {(isTranslating || sessionPhase === 'paused') && (
+                <div className="space-y-3">
+                    <button
+                        onClick={endSession}
+                        disabled={isSubmitting}
+                        className="w-full py-4 rounded-2xl flex flex-col items-center justify-center gap-1.5 transition-all duration-300 transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed border border-dashed bg-red-500/10 border-red-500/50 text-red-400 hover:bg-red-500/20 shadow-[0_0_30px_rgba(239,68,68,0.1)]"
+                    >
+                        <div className="flex items-center gap-2">
+                            <Square className="w-4 h-4 fill-red-400" />
+                            <span className="text-[10px] font-black tracking-[0.2em] uppercase">End Session</span>
+                        </div>
+                    </button>
+
+                    {sessionPhase === 'paused' && (
+                        <button
+                            onClick={handleGiveSummary}
+                            disabled={isSubmitting}
+                            className={`w-full py-4 rounded-2xl flex flex-col items-center justify-center gap-1.5 transition-all duration-300 transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed border border-dashed shadow-[0_0_30px_rgba(34,197,94,0.1)] ${
+                                authUserId 
+                                    ? 'bg-green-500/10 border-green-500/50 text-green-400 hover:bg-green-500/20' 
+                                    : 'bg-gray-800/20 border-gray-700/50 text-gray-500 grayscale opacity-60 hover:bg-gray-800/40'
+                            }`}
+                        >
+                            {isSubmitting ? (
+                                <>
+                                    <div className="w-4 h-4 border-2 border-green-400 border-t-transparent rounded-full animate-spin" />
+                                    <span className="text-[9px] font-black tracking-[0.2em] uppercase">Summarizing...</span>
+                                </>
+                            ) : (
+                                <div className="flex items-center gap-2">
+                                    <span className="text-lg"><Wand2Icon/></span>
+                                    <span className="text-[10px] font-black tracking-[0.2em] uppercase">Generate & Save Summary</span>
+                                </div>
+                            )}
+                        </button>
+                    )}
+                </div>
+            )}
+
+            {sessionPhase === 'ended' && !isTranslating && (
                 <div className="space-y-3">
                     <button
                         onClick={handleGiveSummary}

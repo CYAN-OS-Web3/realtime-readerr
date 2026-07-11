@@ -89,6 +89,8 @@ export const useStore = create((set) => ({
   // --- App Control ---
   isTranslating: false,
   setIsTranslating: (val) => set({ isTranslating: val }),
+  sessionPhase: 'idle', // 'idle' | 'active' | 'paused' | 'ended'
+  setSessionPhase: (phase) => set({ sessionPhase: phase }),
   micVolume: 0,
   setMicVolume: (vol) => set({ micVolume: vol }),
   
