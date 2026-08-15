@@ -125,6 +125,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getBackendUrl: () => ipcRenderer.invoke('cyan:getBackendUrl'),
     getInstallId: () => ipcRenderer.invoke('cyan:getInstallId'),
     openExternal: (url) => ipcRenderer.invoke('cyan:openExternal', url),
+    checkTurnCompleteness: (text, lang) => ipcRenderer.invoke('checkTurnCompleteness', { text, lang }),
 
     // =========================================================
     // DỮ LIỆU ĐỒNG BỘ

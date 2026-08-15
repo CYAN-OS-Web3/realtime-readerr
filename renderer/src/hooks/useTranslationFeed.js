@@ -131,7 +131,7 @@ export const useTranslationFeed = () => {
         const utterance = new SpeechSynthesisUtterance(text);
         
         // Attempt to find a voice that matches the language
-        const voices = window.speechSynthesis.getVoices();
+        const voices = window.speechSynthesis ? window.speechSynthesis.getVoices() : [];
         
         const target = langCode.toLowerCase().replace('_', '-');
         const targetPrefix = target.split('-')[0];
@@ -170,7 +170,9 @@ export const useTranslationFeed = () => {
             console.error('[TTS] Local speech error:', e.error);
         };
         
-        window.speechSynthesis.speak(utterance);
+        if (window.speechSynthesis) {
+            window.speechSynthesis.speak(utterance);
+        }
     }, []);
 
     const clearLocalTtsTimer = useCallback(() => {
@@ -182,7 +184,7 @@ export const useTranslationFeed = () => {
 
     const stopTranslationFromVoiceCommand = useCallback(() => {
         clearLocalTtsTimer();
-        window.speechSynthesis.cancel();
+        if (window.speechSynthesis) window.speechSynthesis.cancel();
         cloudAudioRef.current.pause();
         cloudAudioRef.current.currentTime = 0;
         cloudAudioChunksRef.current = [];
@@ -220,15 +222,20 @@ export const useTranslationFeed = () => {
     // Warm up the voices list (some browsers load it asynchronously)
     useEffect(() => {
         const warmUp = () => {
+            if (!window.speechSynthesis) return;
             const voices = window.speechSynthesis.getVoices();
             if (voices.length > 0) {
                 console.log(`[TTS] System voices loaded: ${voices.length} voices available.`);
             }
         };
         warmUp();
-        window.speechSynthesis.onvoiceschanged = warmUp;
+        if (window.speechSynthesis) {
+            window.speechSynthesis.onvoiceschanged = warmUp;
+        }
         return () => {
-            window.speechSynthesis.onvoiceschanged = null;
+            if (window.speechSynthesis) {
+                window.speechSynthesis.onvoiceschanged = null;
+            }
         };
     }, []);
 
@@ -255,6 +262,12 @@ export const useTranslationFeed = () => {
         });
 
         const unsubSTT = ipcService.onSTTTranscript((data) => {
+            // Keep the shared partial transcript up to date so useAudioPipeline
+            // can read it for adaptive turn detection without any inter-hook coupling.
+            if (data.transcript) {
+                useStore.getState().setLatestPartialTranscript(data.transcript);
+            }
+
             // Updated: Only add or update transcripts
             if (data.isFinal) {
                 useStore.getState().updateLastTranscript({ source: data.transcript, isFinal: true });
@@ -321,7 +334,7 @@ export const useTranslationFeed = () => {
 
             // IMMEDIATE: Stop local TTS without delay (synchronous)
             if (isLocalSpeakingRef.current) {
-                window.speechSynthesis.cancel();
+                if (window.speechSynthesis) window.speechSynthesis.cancel();
                 isLocalSpeakingRef.current = false;
                 console.log('[TTS] Local TTS cancelled immediately on cloud audio arrival');
             }

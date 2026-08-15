@@ -10,7 +10,11 @@ export function useAuthListener() {
 
   useEffect(() => {
     const handlePostMessage = (event) => {
-      // DEBUG: Log ALL incoming messages to find source of auth data
+      // Only handle CYAN auth messages
+      if (typeof event.data?.type !== 'string' || !event.data.type.startsWith('CYAN_')) {
+        return;
+      }
+
       console.log(`[AuthListener] Received message from origin: ${event.origin}`, {
         type: event.data?.type,
         hasToken: !!event.data?.token,

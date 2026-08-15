@@ -3,7 +3,7 @@ import { MessageSquare, Mic2, FileText, Activity, ChevronLeft, ChevronRight, Pan
 import { useStore } from '../store/useStore';
 import { CustomSelect } from './CustomSelect';
 
-export const Sidebar = () => {
+export const Sidebar = ({ className = '' }) => {
     const { activeTab, setActiveTab, micVolume, settings, updateSettings, isTranslating } = useStore();
     const [isCollapsed, setIsCollapsed] = useState(false);
     const [audioDevices, setAudioDevices] = useState([]);
@@ -45,7 +45,7 @@ export const Sidebar = () => {
         <aside
             className={`relative z-20 flex h-full flex-col border-r border-dashed border-gray-700/50 bg-gray-900/40 backdrop-blur-md shadow-[0_0_40px_rgba(0,0,0,0.25)] transition-all duration-300 ease-out ${
                 isCollapsed ? 'w-20 md:w-24' : 'w-64 lg:w-72'
-            }`}
+            } ${className}`}
         >
             <button
                 onClick={() => setIsCollapsed((value) => !value)}

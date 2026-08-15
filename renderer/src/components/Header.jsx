@@ -2,6 +2,7 @@ import React from 'react';
 import { Globe, Minimize2, X, Wifi, WifiOff, LogOut, User, ChevronDown } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { ipcService } from '../services/ipcService';
+import { IS_WEB } from '../web3/config';
 
 export const Header = () => {
     const { 
@@ -53,12 +54,16 @@ export const Header = () => {
         // const loginUrl = 'http://localhost:5174/login?autoOpenApp=1';
         const loginUrl = 'https://cyan-os-landingpage.vercel.app/login?autoOpenApp=1';
         try {
-            const result = await ipcService.openExternal(loginUrl);
-            console.log(result)
-            if (result && result.ok) {
-                addLog('Authentication window opened. Please complete login in your browser.', 'info');
+            if (IS_WEB) {
+                window.location.href = loginUrl;
             } else {
-                addLog('Failed to open login window. Please check your browser settings.', 'error');
+                const result = await ipcService.openExternal(loginUrl);
+                console.log(result)
+                if (result && result.ok) {
+                    addLog('Authentication window opened. Please complete login in your browser.', 'info');
+                } else {
+                    addLog('Failed to open login window. Please check your browser settings.', 'error');
+                }
             }
         } catch (err) {
             addLog('Account connection error: ' + err.message, 'error');
@@ -88,7 +93,7 @@ export const Header = () => {
     };
 
     return (
-        <header className="h-14 bg-gray-900/40 backdrop-blur-md border-b border-dashed border-gray-700/50 flex items-center justify-between px-6 relative z-30 shadow-md">
+        <header className="h-14 bg-gray-900/40 backdrop-blur-md border-b border-dashed border-gray-700/50 flex items-center justify-between px-4 md:px-6 relative z-30 shadow-md">
             {/* Logo Section */}
             <div className="flex items-center gap-4">
                 <div className="flex items-center gap-2">
@@ -105,17 +110,19 @@ export const Header = () => {
                     </div>
                 </div>
 
-                <div className="h-6 w-px bg-gray-800 mx-2" />
+                <div className="hidden md:block h-6 w-px bg-gray-800 mx-2" />
 
-                <div className="flex items-center gap-3">
-                    <div className="flex items-center gap-2">
-                        <div className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-cyan-500 animate-pulse' : 'bg-red-500'} shadow-[0_0_8px_rgba(6,182,212,0.5)]`} />
-                        <span className="text-[10px] font-black text-gray-400 tracking-widest uppercase">{isConnected ? 'ONLINE' : 'OFFLINE'}</span>
+                <div className="flex items-center gap-2 md:gap-3">
+                    <div className="flex items-center gap-1.5 md:gap-2">
+                        <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${isConnected ? 'bg-cyan-500 animate-pulse' : 'bg-red-500'} shadow-[0_0_8px_rgba(6,182,212,0.5)]`} />
+                        <span className="hidden md:block text-[10px] font-black text-gray-400 tracking-widest uppercase">{isConnected ? 'ONLINE' : 'OFFLINE'}</span>
                     </div>
                     {isConnected && (
-                        <span className="text-[9px] font-mono text-cyan-500/50 bg-cyan-500/5 px-2 py-0.5 rounded border border-dashed border-cyan-500/10">{latency}ms</span>
+                        <span className="hidden md:block text-[9px] font-mono text-cyan-500/50 bg-cyan-500/5 px-2 py-0.5 rounded border border-dashed border-cyan-500/10">{latency}ms</span>
                     )}
-                    {getWSIndicator()}
+                    <div className="hidden md:block">
+                        {getWSIndicator()}
+                    </div>
                 </div>
             </div>
 
@@ -128,11 +135,11 @@ export const Header = () => {
                                 onClick={() => setShowDropdown(!showDropdown)}
                                 className="flex items-center gap-3 glass-button rounded-full pl-1.5 pr-3 py-1 group hover:border-cyan-500/50 cursor-pointer select-none"
                             >
-                                <div className="w-6 h-6 rounded-full bg-cyan-500 flex items-center justify-center text-[10px] font-black text-black">
+                                <div className="w-6 h-6 shrink-0 rounded-full bg-cyan-500 flex items-center justify-center text-[10px] font-black text-black">
                                     {(displayName || '').slice(0,2).toUpperCase()}
                                 </div>
-                                <span className="text-[10px] font-bold text-gray-400 max-w-[100px] truncate">{displayName}</span>
-                                <ChevronDown className={`w-3.5 h-3.5 text-gray-500 group-hover:text-cyan-400 transition-all ${showDropdown ? 'rotate-180 text-cyan-400' : ''}`} />
+                                <span className="hidden md:block text-[10px] font-bold text-gray-400 max-w-[100px] truncate">{displayName}</span>
+                                <ChevronDown className={`w-3.5 h-3.5 shrink-0 text-gray-500 group-hover:text-cyan-400 transition-all ${showDropdown ? 'rotate-180 text-cyan-400' : ''}`} />
                             </div>
                             
                             {showDropdown && (
@@ -147,17 +154,21 @@ export const Header = () => {
                                         <User className="w-4 h-4 text-cyan-400" />
                                         <span className="text-[10px] font-black text-gray-200 tracking-widest uppercase">Profile</span>
                                     </button>
-                                    <div className="h-px bg-gray-800 w-full" />
-                                    <button 
-                                        onClick={() => {
-                                            handleLogout();
-                                            setShowDropdown(false);
-                                        }}
-                                        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-red-500/10 transition-colors text-left text-red-400 group"
-                                    >
-                                        <LogOut className="w-4 h-4 group-hover:text-red-300" />
-                                        <span className="text-[10px] font-black tracking-widest uppercase group-hover:text-red-300">Sign Out</span>
-                                    </button>
+                                    {!IS_WEB && (
+                                        <>
+                                            <div className="h-px bg-gray-800 w-full" />
+                                            <button 
+                                                onClick={() => {
+                                                    handleLogout();
+                                                    setShowDropdown(false);
+                                                }}
+                                                className="w-full flex items-center gap-3 px-4 py-3 hover:bg-red-500/10 transition-colors text-left text-red-400 group"
+                                            >
+                                                <LogOut className="w-4 h-4 group-hover:text-red-300" />
+                                                <span className="text-[10px] font-black tracking-widest uppercase group-hover:text-red-300">Sign Out</span>
+                                            </button>
+                                        </>
+                                    )}
                                 </div>
                             )}
                         </div>
@@ -173,14 +184,16 @@ export const Header = () => {
                     )}
                 </div>
 
-                <div className="flex items-center gap-3 border-l border-gray-800 pl-4">
-                    <button onClick={() => ipcService.minimizeWindow()} className="p-1 hover:bg-white/5 rounded transition-colors text-gray-500 hover:text-white">
-                        <Minimize2 className="w-4 h-4" />
-                    </button>
-                    <button onClick={() => ipcService.closeWindow()} className="p-1 hover:bg-red-500/20 rounded transition-colors text-gray-500 hover:text-red-400">
-                        <X className="w-4 h-4" />
-                    </button>
-                </div>
+                {!IS_WEB && (
+                    <div className="hidden md:flex items-center gap-3 border-l border-gray-800 pl-4">
+                        <button onClick={() => ipcService.minimizeWindow()} className="p-1 hover:bg-white/5 rounded transition-colors text-gray-500 hover:text-white">
+                            <Minimize2 className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => ipcService.closeWindow()} className="p-1 hover:bg-red-500/20 rounded transition-colors text-gray-500 hover:text-red-400">
+                            <X className="w-4 h-4" />
+                        </button>
+                    </div>
+                )}
             </div>
         </header>
     );

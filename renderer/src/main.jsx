@@ -1,17 +1,26 @@
 // src/main.jsx
 import React from 'react';
 import { createRoot } from 'react-dom/client';
+import { WagmiProvider } from 'wagmi';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import App from './App';
 import './index.css';
+import { wagmiConfig } from './web3/config';
 
-// Create root element
+const queryClient = new QueryClient({
+  defaultOptions: { queries: { retry: false } },
+});
+
 const container = document.getElementById('root');
 const root = createRoot(container);
 
-// Render the app
 root.render(
   <React.StrictMode>
-    <App />
+    <WagmiProvider config={wagmiConfig}>
+      <QueryClientProvider client={queryClient}>
+        <App />
+      </QueryClientProvider>
+    </WagmiProvider>
   </React.StrictMode>
 );
 

@@ -12,7 +12,7 @@ export const TranslationFeed = () => {
     const targetFlag = settings.languages?.find(l => l.code === targetLang)?.flag || '🌐';
 
     return (
-        <div className="flex-1 flex flex-col glass-panel rounded-2xl overflow-hidden relative group">
+        <div className="flex-1 flex flex-col glass-panel rounded-2xl overflow-hidden relative group min-h-0">
             {/* Header / Legend */}
             <div className="flex items-center justify-between px-5 py-3 bg-gray-900/50 border-b border-dashed border-gray-700/50">
                 <div className="flex items-center gap-4">
@@ -48,7 +48,7 @@ export const TranslationFeed = () => {
                     transcripts.map((item, idx) => (
                         <div 
                             key={idx} 
-                            className="grid grid-cols-2 gap-4 animate-in fade-in slide-in-from-bottom-4 duration-500 ease-out"
+                            className="grid grid-cols-1 md:grid-cols-2 gap-2 md:gap-4 animate-in fade-in slide-in-from-bottom-4 duration-500 ease-out"
                         >
                             {/* Source Side */}
                             <div className="bg-gray-800/30 border border-dashed border-gray-700/50 rounded-xl p-3 shadow-inner hover:bg-gray-800/40 transition-colors">

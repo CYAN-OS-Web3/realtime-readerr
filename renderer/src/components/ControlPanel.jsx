@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Settings, Play, Pause, Square, Volume2, Mic, Activity, SparkleIcon, Wand2Icon } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { ipcService } from '../services/ipcService';
+import { webAudioService } from '../services/webAudioService';
+import { IS_WEB } from '../web3/config';
 import { goBackendService } from '../services/summarizeService';
 import { CustomSelect } from './CustomSelect';
 
@@ -20,7 +22,8 @@ export const ControlPanel = () => {
         clearSessionTranscripts,
         authUserId,
         setToast,
-        hideToast
+        hideToast,
+        micVolume
     } = useStore();
 
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -31,25 +34,49 @@ export const ControlPanel = () => {
                 localStorage.removeItem('inputDeviceId');
                 startSession();
                 setSessionPhase('active');
-                addLog('🟢 Session started', 'info');
+                addLog('Session started', 'info');
             } else {
-                addLog('▶️ Session resumed', 'info');
+                addLog('Session resumed', 'info');
             }
 
             const targetShort = settings.targetLang.split('-')[0];
-            ipcService.toggleTranslation({
-                isTranslating: true,
-                sourceLang: settings.sourceLang,
-                targetLang: targetShort,
-                ttsEngine: settings.ttsEngine,
-                sensitivity: settings.sensitivity,
-                sampleRate: settings.sampleRate,
-                token: localStorage.getItem('cyan_token') || ''
-            });
-            ipcService.showOverlay();
+            const token = localStorage.getItem('cyan_token') || '';
+
+            if (IS_WEB) {
+                if (!token) {
+                    addLog('Not authenticated. Please wait for wallet connection or try again.', 'error');
+                    setIsTranslating(false);
+                    setSessionPhase('idle');
+                    return;
+                }
+                // Browser / MiniPay: connect WebSocket directly to translator-gateway
+                webAudioService.connect(token, {
+                    sourceLang: settings.sourceLang,
+                    targetLang: targetShort,
+                    ttsEngine: settings.ttsEngine,
+                    sensitivity: settings.sensitivity,
+                    sampleRate: settings.sampleRate,
+                }, {
+                    onTranslation: (data) => addLog(`Translation: ${data.target || ''}`, 'info'),
+                    onSTT: () => {},
+                    onStatus: (s) => addLog(`WS: ${s}`, 'info'),
+                });
+            } else {
+                ipcService.toggleTranslation({
+                    isTranslating: true,
+                    sourceLang: settings.sourceLang,
+                    targetLang: targetShort,
+                    ttsEngine: settings.ttsEngine,
+                    sensitivity: settings.sensitivity,
+                    sampleRate: settings.sampleRate,
+                    token,
+                });
+                ipcService.showOverlay();
+            }
+
             setIsTranslating(true);
             setSessionPhase('active');
-            addLog('Bắt đầu dịch trực tiếp...', 'info');
+            addLog('Live translation started...', 'info');
         } catch (err) {
             console.error(isResume ? 'Resume failed:' : 'Start failed:', err);
             setIsTranslating(false);
@@ -58,16 +85,19 @@ export const ControlPanel = () => {
 
     const pauseSession = async () => {
         try {
-            console.log('Sending PAUSE');
-            ipcService.finalizeUtterance();
-            ipcService.toggleTranslation({ isTranslating: false });
-            ipcService.hideOverlay();
+            if (IS_WEB) {
+                webAudioService.disconnect();
+            } else {
+                ipcService.finalizeUtterance();
+                ipcService.toggleTranslation({ isTranslating: false });
+                ipcService.hideOverlay();
+            }
             setIsTranslating(false);
             setSessionPhase('paused');
-            addLog('⏸️ Session paused', 'info');
+            addLog('Session paused', 'info');
         } catch (err) {
             console.error('Pause failed:', err);
-            addLog('❌ Error pausing session', 'error');
+            addLog('Error pausing session', 'error');
         }
     };
 
@@ -77,36 +107,37 @@ export const ControlPanel = () => {
 
     const endSession = useCallback(async () => {
         try {
-            console.log("Sending STOP");
-            ipcService.finalizeUtterance();
-            ipcService.toggleTranslation({ isTranslating: false });
-            ipcService.hideOverlay();
+            if (IS_WEB) {
+                webAudioService.disconnect();
+            } else {
+                ipcService.finalizeUtterance();
+                ipcService.toggleTranslation({ isTranslating: false });
+                ipcService.hideOverlay();
+            }
             setIsTranslating(false);
             setSessionPhase('ended');
             
-            // Get final transcripts
             const sessionData = getSessionTranscripts();
             
             if (sessionData.transcripts.length > 0) {
-                addLog(`⏹️ Session stopped. Captured ${sessionData.transcripts.length} transcripts.`, 'info');
-                addLog(`💡 Click "Give Summary" to summarize the conversation.`, 'info');
+                addLog(`Session stopped. Captured ${sessionData.transcripts.length} transcripts.`, 'info');
+                addLog(`Click "Give Summary" to summarize the conversation.`, 'info');
                 
-                // Automatically check if a summary already exists for this session ID
                 try {
                     const existing = await goBackendService.getStoredSummary(sessionData.sessionId);
                     if (existing) {
-                        addLog('📋 Restored summary from database', 'success');
+                        addLog('Restored summary from database', 'success');
                     }
                 } catch {
                     console.warn('[Summarizer] Failed to check for existing summary');
                 }
             } else {
-                addLog('⏹️ Session stopped. No transcripts captured.', 'info');
+                addLog('Session stopped. No transcripts captured.', 'info');
                 clearSessionTranscripts();
             }
         } catch (err) {
-            console.error("Stop failed:", err);
-            addLog('❌ Error stopping session', 'error');
+            console.error('Stop failed:', err);
+            addLog('Error stopping session', 'error');
         }
     }, [addLog, clearSessionTranscripts, getSessionTranscripts, setIsTranslating, setSessionPhase]);
     const handleGiveSummary = async () => {
@@ -396,6 +427,19 @@ export const ControlPanel = () => {
 
             {/* Fine Tuning */}
             <div className="space-y-4 pt-4 border-t border-gray-800/50 relative z-30">
+                <div className="space-y-2">
+                    <div className="flex items-center justify-between px-1">
+                        <label className="text-[9px] text-gray-500 font-black tracking-widest uppercase">MIC LEVEL</label>
+                        <span className="text-[9px] font-mono text-cyan-500">{Math.round(micVolume || 0)}%</span>
+                    </div>
+                    <div className="h-1.5 bg-gray-800/50 rounded-full overflow-hidden w-full border border-dashed border-gray-700/50">
+                         <div 
+                              className={`h-full transition-all duration-75 ${micVolume > settings.sensitivity/2 ? 'bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.6)]' : 'bg-gray-600'}`}
+                              style={{ width: `${Math.min(100, micVolume || 0)}%` }}
+                         />
+                    </div>
+                </div>
+
                 <div className="space-y-2">
                     <div className="flex items-center justify-between px-1">
                         <label className="text-[9px] text-gray-500 font-black tracking-widest uppercase">GATE SENSITIVITY</label>

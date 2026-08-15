@@ -27,6 +27,7 @@ const piperCache = new PiperCache(2); // Keep max 2 models in memory
 
 const config = require('./config');
 const { state, resetSTTState, updateSettings, getSettings } = require('./state-manager');
+const turnDetector = require('./turnDetectorClient');
 
 // Use config to determine dev mode
 const isDev = config.IS_DEV;
@@ -1363,6 +1364,10 @@ ipcMain.handle('cyan:openExternal', async (_event, url) => {
     }
 });
 
+ipcMain.handle('checkTurnCompleteness', async (_event, { text, lang }) => {
+    return turnDetector.checkCompleteness(text, lang);
+});
+
 // 9. CẤU HÌNH VÀ TẠO CỬA SỔ
 // =========================================================
 
@@ -1493,6 +1498,7 @@ function createOverlayWindow() {
 app.whenReady().then(() => {
     createWindow();
     createOverlayWindow();
+    turnDetector.start();
 
     // FIX: Handle deep link if app was launched via protocol on Windows/Linux
     const launchUrl = process.argv.find(arg => arg.startsWith('cyanos://'));
@@ -1508,6 +1514,10 @@ app.whenReady().then(() => {
             createOverlayWindow();
         }
     });
+});
+
+app.on('before-quit', () => {
+    turnDetector.shutdown();
 });
 
 // Periodic backend health check

@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { useStore } from '../store/useStore';
 import { ipcService } from '../services/ipcService';
+import { webAudioService } from '../services/webAudioService';
+import { IS_WEB } from '../web3/config';
 
 /**
  * AudioWorklet code runs on an isolated audio rendering thread.
@@ -138,7 +140,12 @@ export const useAudioPipeline = () => {
         const merged = mergeChunks(chunkBufferRef.current);
         chunkBufferRef.current = [];
         chunkSamplesRef.current = 0;
-        ipcService.sendAudioChunk(new Uint8Array(merged.buffer));
+        const payload = new Uint8Array(merged.buffer);
+        if (IS_WEB) {
+            webAudioService.sendChunk(payload);
+        } else {
+            ipcService.sendAudioChunk(payload);
+        }
     };
 
     // ---- Lifecycle ------------------------------------------------------
@@ -305,10 +312,102 @@ export const useAudioPipeline = () => {
             const MAX_PREROLL_CHUNKS = 5;
             // SEND_THRESHOLD: flush when we have ≥ 60ms of voice buffered
             const SEND_THRESHOLD_MS = 60;
-            // VOICE_END_SILENCE_MS: declare utterance ended after this much silence
-            const VOICE_END_SILENCE_MS = 800;
-            // KEEPALIVE_INTERVAL_MS: send silence heartbeat every N ms if no voice
-            const KEEPALIVE_INTERVAL_MS = 3000;
+
+            // Adaptive silence flush constants
+            const SILENCE_FLUSH_MIN_MS          = 300;
+            const SILENCE_FLUSH_DEFAULT_MS      = 800;
+            const SILENCE_FLUSH_MAX_MS          = 1400;
+            const SILENCE_FLUSH_HARD_CEILING_MS = 2800;
+            const DEBOUNCE_MS                   = 250;
+            const ADAPTIVE_SILENCE_ENABLED      = true;
+
+            // Mutable timer handles scoped to this startMicrophone() invocation
+            const adaptiveTimerRef    = { current: null };
+            const hardCeilingTimerRef = { current: null };
+            const lastVerdictCacheRef = { current: null };
+
+            // Clears both timers atomically
+            const clearFlushTimers = () => {
+                if (adaptiveTimerRef.current) {
+                    clearTimeout(adaptiveTimerRef.current);
+                    adaptiveTimerRef.current = null;
+                }
+                if (hardCeilingTimerRef.current) {
+                    clearTimeout(hardCeilingTimerRef.current);
+                    hardCeilingTimerRef.current = null;
+                }
+            };
+
+            // Returns the flush delay in ms based on the turn-detector verdict
+            const getAdaptiveSilenceThreshold = async () => {
+                if (!ADAPTIVE_SILENCE_ENABLED) return SILENCE_FLUSH_DEFAULT_MS;
+                if (IS_WEB) return SILENCE_FLUSH_DEFAULT_MS; // No turn completeness on web yet
+
+                const cache = lastVerdictCacheRef.current;
+                if (cache && (Date.now() - cache.ts) < DEBOUNCE_MS) {
+                    return cache.threshold;
+                }
+
+                try {
+                    const text = useStore.getState().latestPartialTranscript || '';
+                    const lang = (useStore.getState().settings.sourceLang || 'en').split('-')[0];
+                    const result = await ipcService.checkTurnCompleteness(text, lang);
+
+                    let threshold = SILENCE_FLUSH_DEFAULT_MS;
+                    if (result.verdict === 'complete')   threshold = SILENCE_FLUSH_MIN_MS;
+                    if (result.verdict === 'incomplete') threshold = SILENCE_FLUSH_MAX_MS;
+
+                    console.log(`[AudioPipeline] TurnDetector verdict=${result.verdict} score=${result.score} threshold=${threshold}ms`);
+
+                    lastVerdictCacheRef.current = { verdict: result.verdict, threshold, ts: Date.now() };
+                    return threshold;
+                } catch {
+                    return SILENCE_FLUSH_DEFAULT_MS;
+                }
+            };
+
+            // Arms both the adaptive and hard-ceiling flush timers.
+            const armFlushTimers = async () => {
+                clearFlushTimers();
+
+                hardCeilingTimerRef.current = setTimeout(() => {
+                    hardCeilingTimerRef.current = null;
+                    adaptiveTimerRef.current = null;
+                    console.log('[AudioPipeline] Hard ceiling timer fired — flushing');
+                    flushPendingChunks();
+                    if (IS_WEB) {
+                        webAudioService.flush();
+                    } else {
+                        ipcService.flushAudio();
+                    }
+                    isVoiceActiveRef.current = false;
+                    hasSentDataRef.current   = false;
+                }, SILENCE_FLUSH_HARD_CEILING_MS);
+
+                const delay = await getAdaptiveSilenceThreshold();
+                
+                // If the hardCeilingTimer was cleared while we were awaiting, speech resumed.
+                if (hardCeilingTimerRef.current === null) {
+                    return;
+                }
+
+                adaptiveTimerRef.current = setTimeout(() => {
+                    adaptiveTimerRef.current = null;
+                    if (hardCeilingTimerRef.current) {
+                        clearTimeout(hardCeilingTimerRef.current);
+                        hardCeilingTimerRef.current = null;
+                    }
+                    console.log(`[AudioPipeline] Adaptive silence timer fired (${delay}ms) — flushing`);
+                    flushPendingChunks();
+                    if (IS_WEB) {
+                        webAudioService.flush();
+                    } else {
+                        ipcService.flushAudio();
+                    }
+                    isVoiceActiveRef.current = false;
+                    hasSentDataRef.current   = false;
+                }, delay);
+            };
 
             workletNode.port.onmessage = (e) => {
                 // Guard: if pipeline stopped, ignore any in-flight messages
@@ -345,7 +444,7 @@ export const useAudioPipeline = () => {
                     if (!isVoiceActiveRef.current) {
                         // First frame of new phrase: prepend pre-roll (exclude current chunk
                         // which is already in preRoll at last position)
-                        console.log(`[AudioPipeline] 🎤 VOICE DETECTED vol=${vol}% thr=${threshold}%`);
+                        console.log(`[AudioPipeline] VOICE DETECTED vol=${vol}% thr=${threshold}%`);
                         const preRoll = preRollBufferRef.current.slice(0, -1);
                         for (const pr of preRoll) {
                             chunkBufferRef.current.push(pr);
@@ -353,6 +452,10 @@ export const useAudioPipeline = () => {
                         }
                         isVoiceActiveRef.current = true;
                     }
+
+                    // Voice resumed — cancel any pending flush timers
+                    clearFlushTimers();
+                    lastVerdictCacheRef.current = null; // invalidate debounce cache on new speech
 
                     chunkBufferRef.current.push(pcm);
                     chunkSamplesRef.current += pcm.length;
@@ -368,27 +471,35 @@ export const useAudioPipeline = () => {
                 } else {
                     // ---- Silence ----
 
-                    // Keepalive: every KEEPALIVE_INTERVAL_MS when totally silent
-                    if (!isVoiceActiveRef.current && !hasSentDataRef.current &&
-                        (now - lastVoiceAtRef.current > KEEPALIVE_INTERVAL_MS)) {
-                        const silence = new Int16Array(Math.floor(settings.sampleRate * 0.060));
-                        ipcService.sendAudioChunk(new Uint8Array(silence.buffer));
-                        lastVoiceAtRef.current = now;
-                    }
+                    if (isVoiceActiveRef.current) {
+                        // Hangover period: keep sending silence chunks to the STT for natural pauses
+                        chunkBufferRef.current.push(pcm);
+                        chunkSamplesRef.current += pcm.length;
 
-                    // Voice END detection
-                    if (hasSentDataRef.current &&
-                        (now - lastVoiceAtRef.current > VOICE_END_SILENCE_MS)) {
+                        const thresholdSamples = Math.floor(settings.sampleRate * (SEND_THRESHOLD_MS / 1000));
+                        if (chunkSamplesRef.current >= thresholdSamples) {
+                            flushPendingChunks();
+                        }
 
-                        console.log(`[AudioPipeline] ⏹️  VOICE ENDED (${VOICE_END_SILENCE_MS}ms silence)`);
-                        isVoiceActiveRef.current = false;
-                        hasSentDataRef.current   = false;
-
-                        // Flush any remaining buffered frames
-                        flushPendingChunks();
-
-                        // Tell backend the phrase is complete
-                        ipcService.flushAudio();
+                        // Arm timers once when silence starts
+                        if (adaptiveTimerRef.current === null && hardCeilingTimerRef.current === null) {
+                            console.log('[AudioPipeline] VOICE ENDED — arming adaptive silence timer');
+                            armFlushTimers();
+                        }
+                    } else {
+                        // Fully silent keepalive
+                        const KEEPALIVE_INTERVAL_MS = 3000;
+                        if (!hasSentDataRef.current &&
+                            (now - lastVoiceAtRef.current > KEEPALIVE_INTERVAL_MS)) {
+                            const silence = new Int16Array(Math.floor(settings.sampleRate * 0.060));
+                            const payload = new Uint8Array(silence.buffer);
+                            if (IS_WEB) {
+                                webAudioService.sendChunk(payload);
+                            } else {
+                                ipcService.sendAudioChunk(payload);
+                            }
+                            lastVoiceAtRef.current = now;
+                        }
                     }
                 }
             };

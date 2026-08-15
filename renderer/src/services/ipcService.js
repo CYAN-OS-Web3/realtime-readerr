@@ -9,12 +9,40 @@ const getElectronAPI = () => {
   if (typeof window !== 'undefined' && window.electronAPI) {
     return window.electronAPI;
   }
-  
+  const listeners = {};
+
   // Return a mock object that doesn't crash but logs warnings
   // All methods return a Promise to match Electron's ipcRenderer.invoke behavior
   return new Proxy({}, {
     get: (target, prop) => {
+      if (prop.startsWith('on')) {
+        return (callback) => {
+          if (!listeners[prop]) listeners[prop] = [];
+          listeners[prop].push(callback);
+          return () => {
+            listeners[prop] = listeners[prop].filter(cb => cb !== callback);
+          };
+        };
+      }
+      
+      if (prop === 'emit') {
+        return (event, ...args) => {
+          const cbs = listeners[event] || [];
+          cbs.forEach(cb => cb(...args));
+        };
+      }
+
       return (...args) => {
+        if (prop === 'getBackendUrl') {
+          return Promise.resolve(
+            (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_BACKEND_URL)
+              ? import.meta.env.VITE_BACKEND_URL
+              : 'https://translator-gateway.fly.dev'
+          );
+        }
+        if (prop === 'getInstallId') {
+          return Promise.resolve('web-id');
+        }
         console.warn(`[ipcService] Attempted to call Electron API "${prop}" in non-Electron environment.`, args);
         return Promise.resolve(null);
       };
@@ -119,5 +147,15 @@ export const ipcService = {
 
   onWSConnectionState: (callback) => {
     return api.onWSConnectionState(callback);
-  }
+  },
+
+  checkTurnCompleteness: (text, lang) => {
+    return api.checkTurnCompleteness(text, lang);
+  },
+
+  emit: (event, ...args) => {
+    if (api.emit) {
+      return api.emit(event, ...args);
+    }
+  },
 };

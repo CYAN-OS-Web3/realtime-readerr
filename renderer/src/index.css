@@ -60,3 +60,30 @@
 .animate-slide-up {
   animation: slide-in-bottom 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
+
+/* ----------------------------------------------------------------
+   MiniPay Mobile Responsive Layout
+   MobileTabBar is shown via .mobile-tabbar class on screens <= 768px.
+   Desktop sidebar (.desktop-sidebar) hidden on mobile.
+   ---------------------------------------------------------------- */
+@media (max-width: 768px) {
+  .desktop-sidebar {
+    display: none !important;
+  }
+  .mobile-tabbar {
+    display: flex !important;
+  }
+  /* Give main content breathing room above the fixed tab bar */
+  main {
+    padding-bottom: 64px !important;
+  }
+}
+
+@media (min-width: 769px) {
+  .mobile-tabbar {
+    display: none !important;
+  }
+  .desktop-sidebar {
+    display: flex;
+  }
+}

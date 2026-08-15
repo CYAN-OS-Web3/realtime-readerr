@@ -1,9 +1,12 @@
 import React from 'react';
+import { SignJWT } from 'jose';
 import { useStore } from './store/useStore';
 import { ipcService } from './services/ipcService';
 import { useAudioPipeline } from './hooks/useAudioPipeline';
 import { useTranslationFeed } from './hooks/useTranslationFeed';
 import { useAuthListener } from './hooks/useAuthListener';
+import { useMiniPayConnect } from './hooks/useMiniPayConnect';
+import { IS_WEB } from './web3/config';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { ControlPanel } from './components/ControlPanel';
@@ -14,6 +17,8 @@ import { SummariesPage } from './components/SummariesPage';
 import { AutoConfigModal } from './components/AutoConfigModal';
 import { ProfileModal } from './components/ProfileModal';
 import { ProfilePage } from './components/ProfilePage';
+import { PaymentGate } from './components/PaymentGate';
+import { MobileTabBar } from './components/MobileTabBar';
 import { X, ExternalLink, Activity, Settings2, Loader2, CheckCircle2 } from 'lucide-react';
 
 const BubbleBackground = () => (
@@ -30,7 +35,7 @@ const FloatingOverlay = () => {
     const last = transcripts[0];
 
     return (
-        <div className="fixed bottom-12 right-12 w-[420px] glass-panel rounded-3xl p-6 z-50 animate-slide-up select-none ring-1 ring-cyan-500/10">
+        <div className="hidden md:block fixed bottom-12 right-12 w-[420px] glass-panel rounded-3xl p-6 z-50 animate-slide-up select-none ring-1 ring-cyan-500/10">
             <div className="flex items-center justify-between mb-5">
                 <div className="flex items-center gap-3">
                     <div className="relative flex h-2 w-2">
@@ -121,9 +126,113 @@ const AppShell = () => {
     // Initialize hooks
     useAudioPipeline();
     useTranslationFeed();
-    useAuthListener(); // Listen for OAuth token from backend
+    useAuthListener(); // Listen for OAuth token from backend (Electron)
+
+    // MiniPay: auto-connect injected wallet
+    const { address: walletAddress } = useMiniPayConnect();
+    // Authenticate with backend and auto-register if missing
+    const authenticateMiniPayUser = React.useCallback(async () => {
+        try {
+            const backendUrl = "https://translator-gateway.fly.dev";
+            const email = `${walletAddress.slice(0, 8)}@minipay.celo`;
+            const password = walletAddress;
+            const username = `minipay_${walletAddress.slice(0, 6)}`;
+
+            let userToken = null;
+            let userData = null;
+
+            // 1. Try to Login
+            try {
+                const loginRes = await fetch(`${backendUrl}/api/v1/auth/login`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ email, password }),
+                });
+                
+                if (!loginRes.ok) throw new Error("Login failed");
+                const loginData = await loginRes.json();
+                userToken = loginData.data?.token;
+                userData = loginData.data?.user;
+            } catch {
+                // 2. If login fails, Register
+                console.log("[MiniPay] Login failed, registering new user...");
+                const regRes = await fetch(`${backendUrl}/api/v1/auth/register`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        email,
+                        username,
+                        password,
+                        first_name: "MiniPay",
+                        last_name: "User"
+                    }),
+                });
+                
+                if (!regRes.ok) throw new Error("Registration failed");
+                
+                // 3. Login again after successful registration
+                const loginRes = await fetch(`${backendUrl}/api/v1/auth/login`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ email, password }),
+                });
+                
+                if (!loginRes.ok) throw new Error("Login after registration failed");
+                const loginData = await loginRes.json();
+                userToken = loginData.data?.token;
+                userData = loginData.data?.user;
+            }
+
+            if (!userToken || !userData) {
+                throw new Error("Failed to authenticate with backend");
+            }
+
+            setAuthUserId(userData.id);
+            localStorage.setItem('cyan_token', userToken);
+            localStorage.setItem('cyan_user', JSON.stringify(userData));
+            addLog(`MiniPay session authenticated (Plan: ${userData.plan || "free"}).`, 'info');
+        } catch (err) {
+            console.error("[MiniPay] Authentication flow failed", err);
+            addLog(`Authentication failed: ${err.message}`, 'error');
+        }
+    }, [walletAddress, setAuthUserId, addLog]);
+
+    React.useEffect(() => {
+        if (!IS_WEB || !walletAddress) return;
+        addLog(`Wallet connected: ${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`, 'success');
+        authenticateMiniPayUser();
+    }, [walletAddress, addLog, authenticateMiniPayUser]);
 
     // Listen for OAuth callback token from backend (URL Params)
+    React.useEffect(() => {
+        if (IS_WEB) {
+            // In web mode, we manually poll the backend health since we don't have Electron IPC
+            const checkHealth = async () => {
+                try {
+                    const backendUrl = 'https://translator-gateway.fly.dev';
+                    const start = performance.now();
+                    const res = await fetch(`${backendUrl}/health`, { method: 'GET' });
+                    const latency = Math.round(performance.now() - start);
+                    
+                    if (res.ok) {
+                        useStore.getState().setConnection(true, latency);
+                        addLog(`Backend connected (ping: ${latency}ms)`, 'success');
+                    } else {
+                        useStore.getState().setConnection(false, 0);
+                        addLog(`Backend health check returned ${res.status}`, 'error');
+                    }
+                } catch (err) {
+                    useStore.getState().setConnection(false, 0);
+                    addLog(`Backend offline: ${err.message}`, 'error');
+                }
+            };
+            
+            checkHealth();
+            const intervalId = setInterval(checkHealth, 30000);
+            return () => clearInterval(intervalId);
+        }
+    }, [addLog]);
+
     React.useEffect(() => {
         const params = new URLSearchParams(window.location.search);
         
@@ -196,9 +305,9 @@ const AppShell = () => {
         switch (activeTab) {
             case 'translation':
                 return (
-                    <div className="flex-1 flex gap-6 p-6 overflow-hidden">
-                        <div className="w-80 flex flex-col gap-6">
-                            <div className="flex-1 glass-panel rounded-2xl overflow-hidden flex flex-col">
+                    <div className="flex-1 flex flex-col md:flex-row gap-4 md:gap-6 p-4 md:p-6 overflow-hidden min-h-0">
+                        <div className="w-full md:w-80 flex flex-col gap-4 md:gap-6 shrink-0 flex-1 md:flex-none min-h-0">
+                            <div className="flex-1 glass-panel rounded-2xl overflow-hidden flex flex-col min-h-0">
                                 <div className="px-5 py-4 border-b border-dashed border-gray-800 flex items-center gap-2">
                                     <Settings2 className="w-4 h-4 text-cyan-500" />
                                     <span className="text-[10px] font-black text-gray-300 tracking-widest uppercase">Quick Settings</span>
@@ -222,17 +331,18 @@ const AppShell = () => {
         }
     };
 
-    return (
+    const appContent = (
         <div className="relative h-screen bg-[#050505] text-gray-100 flex flex-col overflow-hidden font-sans selection:bg-cyan-500/30">
             <BubbleBackground />
             <Header />
             
-            <div className="flex-1 flex overflow-hidden relative z-10">
-                <Sidebar />
-                <main className="flex-1 flex flex-col relative overflow-hidden">
+            <div className="flex-1 flex overflow-hidden relative z-10 min-h-0">
+                <Sidebar className="desktop-sidebar" />
+                <main className="flex-1 flex flex-col relative overflow-hidden min-h-0" style={IS_WEB ? { paddingBottom: '0' } : {}}>
                     {renderContent()}
                 </main>
             </div>
+            {IS_WEB && <MobileTabBar />}
 
             <FloatingOverlay />
             
@@ -286,6 +396,45 @@ const AppShell = () => {
             <audio id="keep-alive-audio" className="hidden" />
         </div>
     );
+
+    if (IS_WEB) {
+        if (!walletAddress) {
+            return (
+                <div className="flex flex-col items-center justify-center min-h-screen bg-[#050505] text-cyan-500 font-black tracking-widest uppercase">
+                    <Loader2 className="w-8 h-8 animate-spin mb-4" />
+                    <p>Connecting Wallet...</p>
+                </div>
+            );
+        }
+
+        return (
+            <PaymentGate
+                onPaymentSuccess={async ({ hash }) => {
+                    addLog(`Payment confirmed: ${hash.slice(0, 10)}...`, 'success');
+                    try {
+                        const token = localStorage.getItem('cyan_token');
+                        const backendUrl = "https://translator-gateway.fly.dev";
+                        await fetch(`${backendUrl}/api/v1/payment/minipay/activate`, {
+                            method: 'POST',
+                            headers: {
+                                'Authorization': `Bearer ${token}`,
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({ transaction_hash: hash })
+                        });
+                        addLog("Plan updated in backend to Pro!", "success");
+                    } catch (e) {
+                        console.error("Failed to activate plan on backend", e);
+                    }
+                    authenticateMiniPayUser(); // Refresh the real token from backend
+                }}
+            >
+                {appContent}
+            </PaymentGate>
+        );
+    }
+
+    return appContent;
 };
 
 export default function App() {

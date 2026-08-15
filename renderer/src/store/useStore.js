@@ -175,6 +175,10 @@ export const useStore = create((set) => ({
   }),
   clearTranscripts: () => set({ transcripts: [] }),
 
+  // Latest partial STT transcript text — written by useTranslationFeed, read by useAudioPipeline
+  latestPartialTranscript: '',
+  setLatestPartialTranscript: (text) => set({ latestPartialTranscript: text }),
+
   // --- Session Transcripts (Final only) ---
   sessionTranscripts: [],
   sessionId: null,

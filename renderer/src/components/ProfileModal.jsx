@@ -10,7 +10,6 @@ export const ProfileModal = () => {
         setAuthUserId,
         addLog,
         backendUrl,
-        setToast
     } = useStore();
 
     const [profile, setProfile] = useState(null);

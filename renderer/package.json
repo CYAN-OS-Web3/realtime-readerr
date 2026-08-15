@@ -4,19 +4,26 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "npx vite",
-    "build": "npx vite build",
+    "dev": "npx vite --mode electron",
+    "dev:web": "npx vite --host 0.0.0.0",
+    "build": "npx vite build --mode electron",
+    "build:web": "npx vite build",
     "preview": "vite preview",
-    "electron:dev": "concurrently -k \"vite\" \"wait-on tcp:5173 && electron ..\"",
-    "electron:build": "vite build && electron-builder"
+    "preview:web": "vite preview --host 0.0.0.0",
+    "electron:dev": "concurrently -k \"vite --mode electron\" \"wait-on tcp:5173 && electron ..\"",
+    "electron:build": "vite build --mode electron && electron-builder"
   },
   "dependencies": {
     "@tailwindcss/forms": "^0.5.11",
     "@tailwindcss/typography": "^0.5.19",
+    "@tanstack/react-query": "^5.101.4",
+    "jose": "^6.2.8",
     "lucide-react": "^0.561.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "sonner": "^2.0.7",
+    "viem": "^2.55.15",
+    "wagmi": "^2.19.5",
     "zustand": "^5.0.12"
   },
   "devDependencies": {
