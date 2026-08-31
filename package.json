@@ -11,6 +11,7 @@
     "start:renderer": "cd renderer && npm run dev",
     "kill-ports": "powershell -Command \"$p1 = Get-NetTCPConnection -LocalPort 5173 -ErrorAction SilentlyContinue; if($p1){$p1 | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }}; $p2 = Get-NetTCPConnection -LocalPort 5174 -ErrorAction SilentlyContinue; if($p2){$p2 | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }}; Get-Process | Where-Object { $_.ProcessName -match 'Electron|realtime-translator' } | Stop-Process -Force -ErrorAction SilentlyContinue; exit 0\"",
     "build:renderer": "cd renderer && npm run build",
+    "build:web": "npm --prefix renderer run build:web",
     "build:dev": "cd renderer && npm run build",
     "doctor": "powershell -ExecutionPolicy Bypass -File ./scripts/doctor.ps1",
     "doctor:check": "powershell -ExecutionPolicy Bypass -File ./scripts/doctor.ps1 -SkipDev",
